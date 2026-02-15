@@ -53,7 +53,6 @@ def login():
                 session['user_id'] = user.get('userid', '').strip()
                 session['user_name'] = user.get('name', 'Unknown')
                 
-                # Capture Location
                 loc_id = user.get('location_id')
                 loc_code = user.get('location')
                 
@@ -66,7 +65,6 @@ def login():
                 
                 print(f"✅ Login: {session['user_id']} @ {session['location']}")
 
-                # Update Online Status
                 try:
                     update_sql = f"UPDATE {Config.DB_AUTH}.dbo.ScanUsers SET userstat=1 WHERE userid=?"
                     cursor.execute(update_sql, (user_id_input,))
@@ -101,8 +99,7 @@ def picking_menu():
         try:
             cursor = conn.cursor()
             
-            # --- STEP 1: RESOLVE ORDER NUMBER (Wildcard Search) ---
-            # We first find the exact SO Number string from the DB
+            # Step 1: Resolve SO
             search_term = f"%{raw_so.strip()}"
             check_sql = f"SELECT TOP 1 sono FROM {Config.DB_ORDERS}.dbo.SOTRAN WHERE sono LIKE ?"
             cursor.execute(check_sql, (search_term,))
@@ -112,13 +109,10 @@ def picking_menu():
                 flash(f"❌ Order '{raw_so}' not found.", "error")
                 return render_template('picking.html', so=None, items=[])
             
-            resolved_so = check_row[0] # Exact string (e.g. '   5099802')
+            resolved_so = check_row[0] 
             user_loc = session.get('location', 'Unknown').strip()
             
-            # --- STEP 2: FETCH ITEMS (FILTERED BY LOCATION) ---
-            # Logic: If I am 'ATL', only show me 'ATL' lines. 
-            # If I am '000' (Admin), show me everything.
-            
+            # Step 2: Fetch Items (Filtered)
             base_sql = f"""
                 SELECT 
                     tranlineno, 
@@ -130,12 +124,9 @@ def picking_menu():
                 FROM {Config.DB_ORDERS}.dbo.SOTRAN 
                 WHERE sono=? AND qtyord > shipqty
             """
-            
             params = [resolved_so]
             
-            # Apply Filter if not Admin
             if user_loc != '000' and user_loc != 'Unknown':
-                # We use LIKE to handle potential whitespace issues in loctid (e.g. 'ATL   ')
                 base_sql += " AND loctid LIKE ?"
                 params.append(f"{user_loc}%")
                 
@@ -144,24 +135,9 @@ def picking_menu():
             cursor.execute(base_sql, tuple(params))
             rows = cursor.fetchall()
             order_items = [row_to_dict(cursor, row) for row in rows]
-            
-            print(f"📦 Items Loaded for {user_loc}: {len(order_items)}")
 
-            # --- STEP 3: SMART DIAGNOSTICS (If list is empty) ---
             if not order_items:
-                # The order exists, but we found no items. Why?
-                
-                # Check 1: Are there items for OTHER warehouses?
-                other_loc_sql = f"SELECT TOP 1 loctid FROM {Config.DB_ORDERS}.dbo.SOTRAN WHERE sono=? AND qtyord > shipqty"
-                cursor.execute(other_loc_sql, (resolved_so,))
-                other_row = cursor.fetchone()
-                
-                if other_row:
-                    other_loc = str(other_row[0]).strip()
-                    flash(f"⚠️ No items for {user_loc}. This order is currently active for: {other_loc}", "warning")
-                else:
-                    # Check 2: Is it fully picked?
-                    flash(f"✅ Order #{resolved_so.strip()} is already fully picked!", "success")
+                flash(f"✅ No open lines for {user_loc} on Order #{resolved_so.strip()}", "success")
                 
         except Exception as e:
             print(f"❌ DB Error: {e}")
@@ -170,6 +146,55 @@ def picking_menu():
             conn.close()
 
     return render_template('picking.html', so=resolved_so, items=order_items)
+
+# --- NEW ROUTE: GET BINS FOR ITEM ---
+@app.route('/get_item_bins', methods=['POST'])
+def get_item_bins():
+    if 'user_id' not in session: return jsonify({'status':'error', 'msg':'Login required'})
+    
+    data = request.json
+    item_code = data.get('item')
+    user_loc = session.get('location', 'Unknown').strip()
+    
+    # Allow Admin ('000') to see all bins, otherwise filter by user location
+    # Note: ScanOnhand2 uses 'location_id' (e.g. 'ATL   ')
+    
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        
+        sql = f"""
+            SELECT bin, onhand, location_id 
+            FROM {Config.DB_AUTH}.dbo.ScanOnhand2 
+            WHERE item=? 
+        """
+        params = [item_code]
+        
+        if user_loc != '000' and user_loc != 'Unknown':
+            sql += " AND location_id LIKE ?"
+            params.append(f"{user_loc}%")
+            
+        sql += " ORDER BY onhand DESC"
+        
+        cursor.execute(sql, tuple(params))
+        rows = cursor.fetchall()
+        
+        bins = []
+        for row in rows:
+            # Format: "A-01-01 (Qty: 50)"
+            r = row_to_dict(cursor, row)
+            bins.append({
+                'bin': r['bin'].strip(),
+                'qty': int(r['onhand']),
+                'loc': r['location_id'].strip()
+            })
+            
+        return jsonify({'status': 'success', 'bins': bins})
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'msg': str(e)})
+    finally:
+        conn.close()
 
 @app.route('/process_scan', methods=['POST'])
 def process_scan():
@@ -186,8 +211,7 @@ def process_scan():
     try:
         cursor = conn.cursor()
         
-        # 1. READ & VALIDATE (Security Check)
-        # Ensure the item is on the order AND belongs to the user's location (unless Admin)
+        # 1. READ & VALIDATE
         sql_check = f"SELECT * FROM {Config.DB_ORDERS}.dbo.SOTRAN WHERE sono=? AND item=?"
         params = [so_num, scanned_input]
         
@@ -224,7 +248,6 @@ def process_scan():
             return jsonify({'status': 'success', 'msg': f'Picked {scanned_input}'})
 
         except Exception as e:
-            # Read-Only Fallback
             if "permission" in str(e).lower() or "read-only" in str(e).lower():
                 rem = line_data.get('qtyord', 0) - line_data.get('shipqty', 0) - qty
                 return jsonify({

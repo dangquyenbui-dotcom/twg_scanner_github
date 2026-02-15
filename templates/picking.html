@@ -11,7 +11,7 @@
         
         <div class="nav-header">
             <a href="/dashboard" class="back-btn"><i class="fas fa-chevron-left"></i> Home</a>
-            <span class="user-info">{{ session['user_id'] }}</span>
+            <span class="user-info">{{ session['user_id'] }} ({{ session['location'] }})</span>
         </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -71,9 +71,11 @@
                     </thead>
                     <tbody>
                         {% for item in items %}
-                        <tr>
+                        <tr onclick="showBins('{{ item.item }}')" style="cursor: pointer;">
                             <td style="color:#718096;">{{ item.tranlineno }}</td>
-                            <td style="font-weight:bold; color:#2b6cb0;">{{ item.item }}</td>
+                            <td style="font-weight:bold; color:#2b6cb0;">
+                                {{ item.item }} <i class="fas fa-info-circle" style="font-size:12px; color:#cbd5e0;"></i>
+                            </td>
                             <td style="text-align:center;">{{ item.qtyord|int }}</td>
                             <td style="text-align:center;">
                                 {% if item.shipqty >= item.qtyord %}
@@ -98,6 +100,24 @@
         </div>
     </div>
 
+    <div id="binModal" class="modal-overlay" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalTitle">Bin Lookup</h3>
+                <span class="close-btn" onclick="closeModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p>Select a bin to pick from:</p>
+                <div id="binList" class="bin-list">
+                    <div style="text-align:center;">Loading...</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="closeModal()" class="btn-cancel">Close</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         const soInput = document.getElementById('soInput');
         const binInput = document.getElementById('binInput');
@@ -105,6 +125,9 @@
         
         // Auto-Focus Logic
         document.addEventListener('click', function(e) {
+            // Don't autofocus if clicking inside the modal
+            if (document.getElementById('binModal').style.display === 'flex') return;
+
             if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'BUTTON') {
                 if(soInput && !soInput.value) soInput.focus();
                 else if(binInput && !binInput.value) binInput.focus();
@@ -112,12 +135,56 @@
             }
         });
 
+        // --- NEW: BIN LOOKUP LOGIC ---
+        function showBins(itemCode) {
+            const modal = document.getElementById('binModal');
+            const list = document.getElementById('binList');
+            document.getElementById('modalTitle').innerText = itemCode;
+            
+            modal.style.display = 'flex'; // Show Modal
+            list.innerHTML = '<div style="padding:20px; text-align:center;"><i class="fas fa-spinner fa-spin"></i> Finding Bins...</div>';
+
+            fetch('/get_item_bins', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({item: itemCode})
+            })
+            .then(response => response.json())
+            .then(data => {
+                list.innerHTML = '';
+                if(data.bins.length === 0) {
+                    list.innerHTML = '<div style="color:red; padding:10px;">No Stock Found in your Warehouse!</div>';
+                } else {
+                    data.bins.forEach(bin => {
+                        // Create clickable bin row
+                        const row = document.createElement('div');
+                        row.className = 'bin-row';
+                        row.innerHTML = `
+                            <span class="bin-name">${bin.bin}</span>
+                            <span class="bin-qty">Qty: ${bin.qty}</span>
+                        `;
+                        // Action: Click bin to auto-fill inputs
+                        row.onclick = function() {
+                            if(binInput) binInput.value = bin.bin;
+                            if(itemInput) itemInput.value = itemCode;
+                            closeModal();
+                            if(itemInput) itemInput.focus(); // Move focus to item to confirm scan
+                        };
+                        list.appendChild(row);
+                    });
+                }
+            });
+        }
+
+        function closeModal() {
+            document.getElementById('binModal').style.display = 'none';
+            if(binInput && !binInput.value) binInput.focus();
+        }
+
+        // --- SUBMIT LOGIC ---
         function submitScan() {
             const btn = document.querySelector('.btn-pick');
-            if(btn) {
-                btn.disabled = true;
-                btn.innerText = "...";
-            }
+            if(btn) { btn.disabled = true; btn.innerText = "..."; }
 
             const data = {
                 so: "{{ so }}",
@@ -133,18 +200,12 @@
             })
             .then(response => response.json())
             .then(data => {
-                if(btn) {
-                    btn.disabled = false;
-                    btn.innerText = "PICK";
-                }
+                if(btn) { btn.disabled = false; btn.innerText = "PICK"; }
                 if(data.status === 'success') {
                     location.reload(); 
                 } else {
                     alert("❌ " + data.msg);
-                    if(itemInput) {
-                        itemInput.value = ''; 
-                        itemInput.focus();
-                    }
+                    if(itemInput) { itemInput.value = ''; itemInput.focus(); }
                 }
             })
             .catch(err => {
@@ -153,7 +214,6 @@
             });
         }
 
-        // Zebra Enter Key Handling
         if(itemInput) {
             itemInput.addEventListener('keypress', function (e) {
                 if (e.key === 'Enter') {
