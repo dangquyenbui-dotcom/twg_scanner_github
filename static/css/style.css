@@ -557,3 +557,59 @@ input.qty-input-large[readonly] {
     border-radius: 4px;
     cursor: pointer;
 }
+/* --- EXISTING CSS --- */
+
+/* Modal Content Tweaks */
+.modal-body {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+#reviewList tr:hover {
+    background-color: #f7fafc;
+}
+
+/* Ensure buttons in modal are visible */
+.btn-sm.btn-danger {
+    padding: 6px 12px;
+    background: #e53e3e;
+    color: white;
+    border-radius: 4px;
+    border: none;
+}
+/* --- EXISTING CSS ABOVE ... --- */
+
+/* Action Button Styles */
+.btn-action {
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 15px;
+    font-weight: bold;
+    font-size: 16px;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    transition: transform 0.1s;
+}
+
+.btn-action:active {
+    transform: scale(0.98);
+    opacity: 0.9;
+}
+
+/* Modal Table */
+#reviewList td {
+    padding: 12px 8px;
+    border-bottom: 1px solid #eee;
+    text-align: center;
+    font-size: 14px;
+}
+
+.btn-danger {
+    background: #e53e3e;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+}

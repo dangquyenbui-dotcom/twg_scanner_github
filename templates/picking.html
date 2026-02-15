@@ -6,7 +6,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
-<body style="padding-bottom: 120px;"> <div class="container" style="max-width: 600px; margin-top: 10px;">
+<body> <div class="container" style="max-width: 600px; margin-top: 10px; margin-bottom: 40px;">
         
         <div class="nav-header">
             <a href="/dashboard" class="back-btn"><i class="fas fa-chevron-left"></i> Home</a>
@@ -47,7 +47,7 @@
                 <div class="mode-selector">
                     <label class="mode-option">
                         <input type="radio" name="pickMode" value="auto" checked onchange="updateMode()">
-                        <span><i class="fas fa-bolt"></i> Auto</span>
+                        <span><i class="fas fa-bolt"></i> Auto (Scan)</span>
                     </label>
                     <label class="mode-option">
                         <input type="radio" name="pickMode" value="manual" onchange="updateMode()">
@@ -91,7 +91,8 @@
                             <td style="color:#718096;">{{ item.tranlineno }}</td>
                             <td style="font-weight:bold; color:#2b6cb0;">{{ item.item }}</td>
                             <td style="text-align:center;">{{ item.qtyord|int }}</td>
-                            <td style="text-align:center;" class="picked-cell">0</td> </tr>
+                            <td style="text-align:center;" class="picked-cell">0</td> 
+                        </tr>
                         {% else %}
                         <tr>
                             <td colspan="4" style="text-align:center; padding:30px; color:#38a169;">
@@ -105,24 +106,24 @@
 
             <div id="binButtonArea" style="display:none; margin-top:15px;">
                 <button class="btn-secondary" onclick="openBinModal()">
-                    <i class="fas fa-search"></i> View Bins
+                    <i class="fas fa-search"></i> View Bins for Selection
+                </button>
+            </div>
+
+            <hr style="border: 0; border-top: 2px dashed #e2e8f0; margin: 25px 0;">
+
+            <div style="display: flex; gap: 10px;">
+                <button class="btn-action" style="background:#718096; flex:1;" onclick="openReviewModal()">
+                    <i class="fas fa-list"></i> Scanned (<span id="scanCount">0</span>)
+                </button>
+                <button class="btn-action" style="background:#38a169; flex:1;" onclick="submitFinal()">
+                    <i class="fas fa-paper-plane"></i> Submit
                 </button>
             </div>
 
             {% endif %}
         </div>
     </div>
-
-    {% if so %}
-    <div class="action-bar visible" style="justify-content: space-around;">
-        <button class="btn-action" style="background:#718096; width:45%;" onclick="openReviewModal()">
-            <i class="fas fa-list"></i> View Scanned
-        </button>
-        <button class="btn-action" style="background:#38a169; width:45%;" onclick="submitFinal()">
-            <i class="fas fa-paper-plane"></i> Submit Order
-        </button>
-    </div>
-    {% endif %}
 
     <div id="binModal" class="modal-overlay" style="display:none;">
         <div class="modal-content">
@@ -140,22 +141,25 @@
     <div id="reviewModal" class="modal-overlay" style="display:none;">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Scanned Items (Session)</h3>
+                <h3>Session Review</h3>
                 <span class="close-btn" onclick="closeModal('reviewModal')">&times;</span>
             </div>
-            <div class="modal-body" style="padding:0;">
-                <table class="pick-table">
-                    <thead>
+            <div class="modal-body" style="padding:0; overflow-y:auto; max-height:400px;">
+                <table class="pick-table" style="width:100%;">
+                    <thead style="background:#f7fafc;">
                         <tr>
-                            <th>Item</th>
+                            <th style="padding:10px;">Item</th>
                             <th>Bin</th>
                             <th>Qty</th>
-                            <th>Action</th>
+                            <th>Act</th>
                         </tr>
                     </thead>
                     <tbody id="reviewList"></tbody>
                 </table>
-                <div id="emptyReview" style="padding:20px; text-align:center; color:#718096;">No items scanned yet.</div>
+                <div id="emptyReview" style="padding:30px; text-align:center; color:#718096; font-size:16px;">
+                    <i class="fas fa-box-open fa-2x"></i><br><br>
+                    No items in session yet.
+                </div>
             </div>
             <div class="modal-footer"><button onclick="closeModal('reviewModal')" class="btn-cancel">Back</button></div>
         </div>
@@ -166,10 +170,7 @@
         let currentBinMaxQty = 999999;
         let currentOrderMaxQty = 999999; 
         let isAutoMode = true;
-        let currentBin = ""; // Track current bin for session
-        
-        // SESSION STORAGE (Shopping Cart)
-        // Format: { id: timestamp, item: "...", bin: "...", qty: 1 }
+        let currentBin = ""; 
         let sessionPicks = [];
 
         function updateMode() {
@@ -191,11 +192,9 @@
             currentOrderMaxQty = remainingQty; 
             document.getElementById('binButtonArea').style.display = 'block';
             
-            // Reset Inputs but NOT session data
             document.getElementById('binInput').value = '';
             document.getElementById('itemInput').value = '';
             
-            // Calc current session qty for this item
             updateSessionDisplay();
             
             currentBinMaxQty = 999999; 
@@ -203,20 +202,30 @@
         }
 
         function updateSessionDisplay() {
-            // Calculate total picked for this item in session
+            if(!selectedItemCode) return;
+            
+            // 1. Update Grid Cell for selected item
             const itemTotal = sessionPicks
                 .filter(p => p.item === selectedItemCode)
                 .reduce((sum, p) => sum + p.qty, 0);
             
-            document.getElementById('qtyInput').value = itemTotal;
-            
-            // Update Grid Table Display
-            // Note: In real app we'd map this better, here simplistic
             const activeRow = document.querySelector('.active-row .picked-cell');
             if(activeRow) activeRow.innerText = itemTotal;
+
+            // 2. Update Grid Cells for ALL items (in case we deleted something)
+            // Ideally we iterate rows, but simplistic approach:
+            sessionPicks.forEach(p => {
+                // Find row by ID or content? Row IDs were added in template
+            });
+
+            // 3. Update Global Counter Button
+            const totalCount = sessionPicks.length;
+            document.getElementById('scanCount').innerText = totalCount;
+            
+            // 4. Update Qty Input (Session Qty)
+            document.getElementById('qtyInput').value = itemTotal;
         }
 
-        // --- VALIDATION ---
         function validateBin() {
             const binVal = document.getElementById('binInput').value.trim();
             if(!binVal || !selectedItemCode) return;
@@ -230,7 +239,7 @@
             .then(data => {
                 if(data.status === 'success') {
                     currentBinMaxQty = data.onhand;
-                    currentBin = binVal; // Lock in this bin
+                    currentBin = binVal; 
                     document.getElementById('itemInput').focus();
                 } else {
                     alert(data.msg);
@@ -240,33 +249,24 @@
             });
         }
 
-        // --- LOGIC: ADD TO SESSION ---
         function addToSession() {
             if(!selectedItemCode) { alert("Select item first!"); return; }
             
-            // Validate Bin Input matches validated bin
             const inputBin = document.getElementById('binInput').value.trim();
             if(inputBin !== currentBin) {
                 alert("Please validate bin first (Press Enter on Bin field)");
                 return;
             }
 
-            // Calculate Qty to Add
             let qtyToAdd = 0;
             if(isAutoMode) {
                 qtyToAdd = 1; 
             } else {
                 qtyToAdd = parseFloat(document.getElementById('qtyInput').value) || 0;
-                // In manual mode, we need to diff against what's already there? 
-                // NO, simplified: Manual mode = "Add this specific amount".
-                // Wait, if I type 5, does it mean "Total 5" or "Add 5"?
-                // Standard convention: Manual Entry usually replaces or adds. 
-                // Let's make Manual Mode = "Add this quantity".
                 if(qtyToAdd <= 0) return;
             }
 
-            // --- CHECKS ---
-            // 1. Bin Check (Sum of picks for THIS bin)
+            // CHECKS
             const picksInBin = sessionPicks
                 .filter(p => p.item === selectedItemCode && p.bin === currentBin)
                 .reduce((sum, p) => sum + p.qty, 0);
@@ -276,7 +276,6 @@
                 return;
             }
 
-            // 2. Order Check (Sum of ALL picks for this item)
             const totalPicked = sessionPicks
                 .filter(p => p.item === selectedItemCode)
                 .reduce((sum, p) => sum + p.qty, 0);
@@ -286,7 +285,7 @@
                 return;
             }
 
-            // --- SAVE TO SESSION ---
+            // Add
             sessionPicks.push({
                 id: Date.now(),
                 item: selectedItemCode,
@@ -294,16 +293,14 @@
                 qty: qtyToAdd
             });
 
-            // Flash effect
+            // Feedback
             const qtyBox = document.getElementById('qtyInput');
             qtyBox.classList.remove('flash-active');
             void qtyBox.offsetWidth;
             qtyBox.classList.add('flash-active');
 
-            // Update UI
             updateSessionDisplay();
             
-            // Reset for next scan
             document.getElementById('itemInput').value = '';
             if(isAutoMode) document.getElementById('itemInput').focus();
         }
@@ -318,18 +315,15 @@
                 return;
             }
 
-            if(isAutoMode) {
-                addToSession(); // Auto-add 1
-            } else {
+            if(isAutoMode) addToSession(); 
+            else {
                 document.getElementById('qtyInput').focus();
                 document.getElementById('qtyInput').select();
             }
         }
 
-        // --- SUBMIT FINAL ---
         function submitFinal() {
             if(sessionPicks.length === 0) { alert("Nothing scanned!"); return; }
-            
             if(!confirm(`Submit ${sessionPicks.length} pick records?`)) return;
 
             const btn = document.querySelector('.btn-action[onclick="submitFinal()"]');
@@ -357,7 +351,6 @@
             });
         }
 
-        // --- REVIEW MODAL ---
         function openReviewModal() {
             const list = document.getElementById('reviewList');
             list.innerHTML = '';
@@ -368,11 +361,16 @@
                 document.getElementById('emptyReview').style.display = 'none';
                 sessionPicks.forEach((p, index) => {
                     const row = document.createElement('tr');
+                    row.style.borderBottom = "1px solid #eee";
                     row.innerHTML = `
-                        <td>${p.item}</td>
-                        <td>${p.bin}</td>
-                        <td>${p.qty}</td>
-                        <td><button class="btn-sm btn-danger" onclick="removePick(${index})">X</button></td>
+                        <td style="padding:10px; font-weight:bold; color:#2d3748;">${p.item}</td>
+                        <td style="text-align:center; color:#4a5568;">${p.bin}</td>
+                        <td style="text-align:center; font-weight:bold; color:#2b6cb0;">${p.qty}</td>
+                        <td style="text-align:center;">
+                            <button class="btn-sm btn-danger" onclick="removePick(${index})">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </td>
                     `;
                     list.appendChild(row);
                 });
@@ -381,12 +379,13 @@
         }
 
         function removePick(index) {
-            sessionPicks.splice(index, 1);
-            openReviewModal(); // Re-render
-            updateSessionDisplay(); // Update main screen numbers
+            if(confirm("Remove this pick?")) {
+                sessionPicks.splice(index, 1);
+                openReviewModal(); 
+                updateSessionDisplay();
+            }
         }
 
-        // --- BIN LOOKUP (View Bins) ---
         function openBinModal() {
             if(!selectedItemCode) return;
             const modal = document.getElementById('binModal');
@@ -414,10 +413,8 @@
                 }
             });
         }
-
         function closeModal(id) { document.getElementById(id).style.display = 'none'; }
 
-        // --- LISTENERS ---
         const binInput = document.getElementById('binInput');
         const itemInput = document.getElementById('itemInput');
         const qtyInput = document.getElementById('qtyInput');
