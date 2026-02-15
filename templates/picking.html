@@ -2,17 +2,16 @@
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TWG Picking</title>
+    <title>Picking</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
-    <div class="container" style="max-width: 600px; margin-top: 20px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-            <div>
-                <h4 style="margin:0;">📦 Sales Order Pick</h4>
-                <small style="color: #666;">User: <b>{{ session['user_id'] }}</b> ({{ session['location'] }})</small>
-            </div>
-            <a href="/logout" class="btn-sm" style="background:#e53e3e; color:white; text-decoration:none; padding:5px 10px; border-radius:5px;">Logout</a>
+    <div class="container" style="max-width: 600px; margin-top: 10px;">
+        
+        <div class="nav-header">
+            <a href="/dashboard" class="back-btn"><i class="fas fa-chevron-left"></i> Home</a>
+            <span class="user-info">{{ session['user_id'] }}</span>
         </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -25,62 +24,87 @@
 
         <div class="scanner-card">
             {% if not so %}
-            <form method="GET" action="/picking">
-                <label>Scan Sales Order:</label>
-                <input type="text" name="so" class="scan-input" id="soInput" placeholder="Scan SO..." autofocus autocomplete="off">
-                <button type="submit" class="btn-large">START</button>
-            </form>
+            <div style="text-align:center; padding: 40px 20px;">
+                <div class="icon-circle bg-blue" style="margin: 0 auto 20px auto; width: 80px; height: 80px; font-size: 32px;">
+                    <i class="fas fa-barcode"></i>
+                </div>
+                <h3 style="color: #4a5568;">Scan Sales Order</h3>
+                <form method="GET" action="/picking" style="margin-top: 20px;">
+                    <input type="text" name="so" class="scan-input" id="soInput" placeholder="Scan SO Barcode..." autofocus autocomplete="off">
+                </form>
+            </div>
             
             {% else %}
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                <strong style="font-size: 1.2em;">Order: {{ so }}</strong>
-                <a href="/picking" style="color: #e53e3e; text-decoration: underline;">Change Order</a>
+            <div class="so-header">
+                <div>
+                    <span style="font-size:12px; color:#718096; text-transform:uppercase; letter-spacing:1px;">Sales Order</span><br>
+                    <strong style="font-size:24px; color:#2d3748;">#{{ so }}</strong>
+                </div>
+                <a href="/picking" class="change-so">Change</a>
             </div>
 
-            <div id="scanForm" style="background: #f8f9fa; padding: 10px; border-radius: 8px; border: 1px solid #ddd;">
-                <input type="text" id="binInput" class="scan-input" placeholder="Scan BIN..." autocomplete="off">
-                <input type="text" id="itemInput" class="scan-input" placeholder="Scan ITEM..." autocomplete="off" style="margin-top: 5px;">
+            <div id="scanForm" class="scan-area">
+                <div class="form-group">
+                    <label>Bin Location</label>
+                    <input type="text" id="binInput" class="scan-input" placeholder="Scan BIN..." autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label>Item / UPC</label>
+                    <input type="text" id="itemInput" class="scan-input" placeholder="Scan ITEM..." autocomplete="off">
+                </div>
                 
-                <div style="display: flex; gap: 5px; margin-top: 5px;">
-                    <input type="number" id="qtyInput" class="scan-input" value="1" style="flex: 1;">
-                    <button onclick="submitScan()" class="btn-large" style="flex: 2; margin: 0;">PICK</button>
+                <div class="qty-area">
+                    <input type="number" id="qtyInput" class="scan-input qty-input" value="1">
+                    <button onclick="submitScan()" class="btn-pick">PICK</button>
                 </div>
             </div>
 
-            <hr>
-            
-            <h5>Remaining Items:</h5>
-            <div class="items-list">
-                {% for item in items %}
-                <div class="item-row" style="padding: 10px; border-bottom: 1px solid #eee;">
-                    <div style="display: flex; justify-content: space-between;">
-                        <span style="font-weight:bold; font-size: 1.1em;">{{ item.item }}</span>
-                        <span class="qty-badge">{{ item.shipqty }} / {{ item.qtyord }}</span>
-                    </div>
-                    <div style="font-size: 0.9em; color: #555;">
-                        Bin: {{ item.loctid }} | Line: {{ item.tranlineno }}
-                    </div>
-                </div>
-                {% else %}
-                <div style="text-align:center; padding:20px; color: green;">
-                    <h3>✅ Order Complete</h3>
-                    <a href="/picking" class="btn-large">Next Order</a>
-                </div>
-                {% endfor %}
+            <div class="table-responsive">
+                <table class="pick-table">
+                    <thead>
+                        <tr>
+                            <th width="15%">No</th>
+                            <th width="45%">Item</th>
+                            <th width="20%">Order</th>
+                            <th width="20%">Pick</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in items %}
+                        <tr>
+                            <td style="color:#718096;">{{ item.tranlineno }}</td>
+                            <td style="font-weight:bold; color:#2b6cb0;">{{ item.item }}</td>
+                            <td style="text-align:center;">{{ item.qtyord|int }}</td>
+                            <td style="text-align:center;">
+                                {% if item.shipqty >= item.qtyord %}
+                                    <span style="color:#38a169; font-weight:bold;"><i class="fas fa-check"></i></span>
+                                {% else %}
+                                    <span style="color:#e53e3e; font-weight:bold;">{{ item.shipqty|int }}</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="4" style="text-align:center; padding:30px; color:#38a169;">
+                                <i class="fas fa-check-circle fa-3x" style="margin-bottom:10px;"></i><br>
+                                <strong>All Lines Picked!</strong>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
             {% endif %}
         </div>
     </div>
 
     <script>
-        // --- SCANNER LOGIC ---
         const soInput = document.getElementById('soInput');
         const binInput = document.getElementById('binInput');
         const itemInput = document.getElementById('itemInput');
         
-        // 1. Auto-Focus Logic: Keep cursor alive
+        // Auto-Focus Logic
         document.addEventListener('click', function(e) {
-            // Only refocus if user didn't click on a specific input
             if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'BUTTON') {
                 if(soInput && !soInput.value) soInput.focus();
                 else if(binInput && !binInput.value) binInput.focus();
@@ -88,16 +112,17 @@
             }
         });
 
-        // 2. Submit Logic
         function submitScan() {
-            const btn = document.querySelector('button[onclick="submitScan()"]');
-            btn.disabled = true;
-            btn.innerText = "Processing...";
+            const btn = document.querySelector('.btn-pick');
+            if(btn) {
+                btn.disabled = true;
+                btn.innerText = "...";
+            }
 
             const data = {
                 so: "{{ so }}",
-                bin: binInput.value,
-                item: itemInput.value,
+                bin: binInput ? binInput.value : '',
+                item: itemInput ? itemInput.value : '',
                 qty: document.getElementById('qtyInput').value
             };
 
@@ -108,37 +133,34 @@
             })
             .then(response => response.json())
             .then(data => {
-                btn.disabled = false;
-                btn.innerText = "PICK";
-
+                if(btn) {
+                    btn.disabled = false;
+                    btn.innerText = "PICK";
+                }
                 if(data.status === 'success') {
-                    // Success Beep logic here if needed
                     location.reload(); 
                 } else {
-                    alert("❌ ERROR: " + data.msg);
-                    itemInput.value = ''; 
-                    itemInput.focus();
+                    alert("❌ " + data.msg);
+                    if(itemInput) {
+                        itemInput.value = ''; 
+                        itemInput.focus();
+                    }
                 }
             })
             .catch(err => {
                 alert("Network Error");
-                btn.disabled = false;
-                btn.innerText = "PICK";
+                if(btn) btn.disabled = false;
             });
         }
 
-        // 3. Auto-Submit on Enter (Zebra Scanner sends Enter key)
+        // Zebra Enter Key Handling
         if(itemInput) {
             itemInput.addEventListener('keypress', function (e) {
                 if (e.key === 'Enter') {
-                    if (binInput.value === "") {
-                        binInput.focus(); // Force bin scan first
-                    } else {
-                        submitScan();
-                    }
+                    if (binInput.value === "") binInput.focus();
+                    else submitScan();
                 }
             });
-            // Also move from Bin to Item on Enter
             binInput.addEventListener('keypress', function(e) {
                 if (e.key === 'Enter') itemInput.focus();
             });

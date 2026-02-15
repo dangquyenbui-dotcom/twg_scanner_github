@@ -5,8 +5,8 @@ import pyodbc
 app = Flask(__name__)
 app.config.from_object(Config)
 
+# --- DB Connection Helper ---
 def get_db_connection():
-    """Connects to SQL Server using details from .env"""
     conn_str = (
         f"DRIVER={app.config['DB_DRIVER']};"
         f"SERVER={app.config['DB_SERVER']};"
@@ -15,26 +15,27 @@ def get_db_connection():
         f"PWD={app.config['DB_PWD']};"
     )
     try:
-        # Timeout set to 5 seconds to fail fast if DB is down
         return pyodbc.connect(conn_str, timeout=5)
     except Exception as e:
         print(f"DB Connection Error: {e}")
         return None
 
 def row_to_dict(cursor, row):
-    """Helper to convert SQL rows to dictionaries"""
-    return dict(zip([column[0] for column in cursor.description], row))
+    # Force lowercase keys for consistency
+    columns = [column[0].lower() for column in cursor.description]
+    return dict(zip(columns, row))
+
+# --- ROUTES ---
 
 @app.route('/')
 def index():
     if 'user_id' not in session:
         return redirect(url_for('login'))
-    return redirect(url_for('picking_menu'))
+    return redirect(url_for('dashboard'))
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        # .strip() removes accidental spaces from scanner input
         user_id_input = request.form['userid'].strip().upper()
         password_input = request.form['password']
         
@@ -45,40 +46,44 @@ def login():
 
         try:
             cursor = conn.cursor()
-            # 1. Verify Credentials
-            # We match strictly on ID and Password.
             sql = f"SELECT * FROM {Config.DB_AUTH}.dbo.ScanUsers WHERE userid=? AND pw=?"
             cursor.execute(sql, (user_id_input, password_input))
             row = cursor.fetchone()
             
             if row:
                 user = row_to_dict(cursor, row)
+                session['user_id'] = user.get('userid', '').strip()
+                session['user_name'] = user.get('name', 'Unknown')
                 
-                # 2. Success - Setup Session
-                session['user_id'] = user['userid'].strip()
-                session['user_name'] = user['name']
-                # Capture the text location (e.g., 'ATL', 'LA')
-                session['location'] = user['location_id'].strip() if user['location_id'] else 'Unknown'
+                # Location Logic
+                loc_id = user.get('location_id')
+                loc_code = user.get('location')
+                if loc_id: session['location'] = loc_id.strip()
+                elif loc_code: session['location'] = str(loc_code).strip()
+                else: session['location'] = 'Unknown'
 
-                # 3. Update Status to 1 (Online)
-                # We wrap this in a try/except so Read-Only accounts (svcpowerbi) can still login
+                # Set Online Status (Try/Catch for Read-Only)
                 try:
                     update_sql = f"UPDATE {Config.DB_AUTH}.dbo.ScanUsers SET userstat=1 WHERE userid=?"
-                    cursor.execute(update_sql, (user['userid'],))
+                    cursor.execute(update_sql, (user_id_input,))
                     conn.commit()
-                except Exception as e:
-                    print(f"Warning: Could not update status (likely Read-Only DB): {e}")
+                except Exception:
+                    pass
 
-                return redirect(url_for('picking_menu'))
+                return redirect(url_for('dashboard')) 
             else:
                 flash("Invalid User ID or Password.", "error")
-                
         except Exception as e:
             flash(f"Login Error: {str(e)}", "error")
         finally:
             conn.close()
             
     return render_template('login.html')
+
+@app.route('/dashboard')
+def dashboard():
+    if 'user_id' not in session: return redirect(url_for('login'))
+    return render_template('dashboard.html')
 
 @app.route('/picking', methods=['GET'])
 def picking_menu():
@@ -91,9 +96,7 @@ def picking_menu():
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
-            
-            # Read Order from PRO05.SOTRAN
-            # Showing items that still need picking (qtyord > shipqty)
+            # Fetch Items: showing TranLineNo as 'No'
             sql = f"""
                 SELECT 
                     tranlineno, 
@@ -112,12 +115,6 @@ def picking_menu():
             
             if not order_items:
                 flash(f"Order {current_so} not found or fully picked!", "info")
-            else:
-                # Optional: Check if order location matches user location
-                order_loc = order_items[0].get('loctid', '').strip()
-                user_loc = session.get('location', '')
-                if order_loc and user_loc and order_loc != user_loc:
-                     flash(f"⚠️ Warning: This order is for {order_loc}, but you are in {user_loc}", "warning")
                 
         except Exception as e:
             flash(f"Database Error: {str(e)}", "error")
@@ -128,9 +125,6 @@ def picking_menu():
 
 @app.route('/process_scan', methods=['POST'])
 def process_scan():
-    """
-    Handles the picking logic.
-    """
     if 'user_id' not in session: return jsonify({'status':'error', 'msg':'Session expired'})
     
     data = request.json
@@ -152,11 +146,10 @@ def process_scan():
             return jsonify({'status': 'error', 'msg': f'Item {scanned_input} not in Order!'})
             
         line_data = row_to_dict(cursor, so_row)
-        tran_line = line_data['tranlineno']
+        tran_line = line_data.get('tranlineno')
         
         # 2. WRITE: Attempt to Update DB
         try:
-            # Insert Transaction
             insert_sql = f"""
                 INSERT INTO {Config.DB_AUTH}.dbo.ScanBinTran2 
                 (actiontype, applid, udref, tranlineno, userid, item, binfr, quantity, deviceid, adddate, scanstat)
@@ -164,7 +157,6 @@ def process_scan():
             """
             cursor.execute(insert_sql, (so_num, tran_line, session['user_id'], scanned_input, bin_loc, qty))
             
-            # Update Order Qty
             update_sql = f"""
                 UPDATE {Config.DB_ORDERS}.dbo.SOTRAN 
                 SET shipqty = shipqty + ? 
@@ -176,12 +168,13 @@ def process_scan():
             return jsonify({'status': 'success', 'msg': f'Picked {scanned_input}'})
 
         except Exception as e:
-            # Fallback for Read-Only credentials (Simulation Mode)
+            # Read-Only Fallback (Simulation)
             if "permission" in str(e).lower() or "read-only" in str(e).lower():
+                rem = line_data.get('qtyord', 0) - line_data.get('shipqty', 0) - qty
                 return jsonify({
                     'status': 'success', 
-                    'msg': f'Picked {scanned_input} (Simulated - Read Only)',
-                    'remaining': line_data['qtyord'] - line_data['shipqty'] - qty
+                    'msg': f'Picked {scanned_input} (Simulated)',
+                    'remaining': rem
                 })
             else:
                 raise e
@@ -194,20 +187,6 @@ def process_scan():
 
 @app.route('/logout')
 def logout():
-    # Attempt to set status to 0 (Offline) before clearing session
-    if 'user_id' in session:
-        conn = get_db_connection()
-        if conn:
-            try:
-                cursor = conn.cursor()
-                update_sql = f"UPDATE {Config.DB_AUTH}.dbo.ScanUsers SET userstat=0 WHERE userid=?"
-                cursor.execute(update_sql, (session['user_id'],))
-                conn.commit()
-            except Exception:
-                pass # Ignore DB errors on logout
-            finally:
-                conn.close()
-                
     session.clear()
     return redirect(url_for('login'))
 
