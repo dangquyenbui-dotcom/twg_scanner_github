@@ -351,3 +351,95 @@ input.scan-input:focus {
     font-weight: bold;
     cursor: pointer;
 }
+/* --- EXISTING CSS ABOVE ... --- */
+
+/* --- ROW HIGHLIGHTING --- */
+.item-row {
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.item-row:hover {
+    background-color: #f7fafc;
+}
+
+/* Active Selection Color (Light Blue) */
+.active-row {
+    background-color: #bee3f8 !important; /* Force override */
+    border-left: 4px solid #3182ce;
+}
+
+.active-row td {
+    color: #2a4365;
+}
+
+/* --- STICKY ACTION BAR --- */
+.action-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    background: white;
+    border-top: 1px solid #e2e8f0;
+    box-shadow: 0 -4px 6px rgba(0,0,0,0.05);
+    padding: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transform: translateY(100%); /* Hidden by default */
+    transition: transform 0.3s ease-out;
+    box-sizing: border-box;
+}
+
+.action-bar.visible {
+    transform: translateY(0); /* Slide up */
+}
+
+.btn-action {
+    background: #3182ce;
+    color: white;
+    border: none;
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-weight: bold;
+    font-size: 16px;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(49, 130, 206, 0.4);
+}
+
+.btn-action:active {
+    background: #2b6cb0;
+    transform: scale(0.98);
+}
+/* --- EXISTING CSS ABOVE ... --- */
+
+/* Secondary Button (View Bins) */
+.btn-secondary {
+    width: 100%;
+    padding: 12px;
+    background: #718096; /* Grey/Blue */
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    margin-top: 5px;
+}
+
+.btn-secondary:active {
+    background: #4a5568;
+}
+
+/* Row Highlight */
+.item-row {
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+.active-row {
+    background-color: #bee3f8 !important;
+    border-left: 4px solid #3182ce;
+}
+.active-row td {
+    color: #2a4365;
+}

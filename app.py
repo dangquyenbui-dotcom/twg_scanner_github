@@ -63,8 +63,6 @@ def login():
                 else: 
                     session['location'] = 'Unknown'
                 
-                print(f"✅ Login: {session['user_id']} @ {session['location']}")
-
                 try:
                     update_sql = f"UPDATE {Config.DB_AUTH}.dbo.ScanUsers SET userstat=1 WHERE userid=?"
                     cursor.execute(update_sql, (user_id_input,))
@@ -112,7 +110,7 @@ def picking_menu():
             resolved_so = check_row[0] 
             user_loc = session.get('location', 'Unknown').strip()
             
-            # Step 2: Fetch Items (Filtered)
+            # Step 2: Fetch Items
             base_sql = f"""
                 SELECT 
                     tranlineno, 
@@ -140,38 +138,33 @@ def picking_menu():
                 flash(f"✅ No open lines for {user_loc} on Order #{resolved_so.strip()}", "success")
                 
         except Exception as e:
-            print(f"❌ DB Error: {e}")
             flash(f"Database Error: {str(e)}", "error")
         finally:
             conn.close()
 
     return render_template('picking.html', so=resolved_so, items=order_items)
 
-# --- NEW ROUTE: GET BINS FOR ITEM ---
 @app.route('/get_item_bins', methods=['POST'])
 def get_item_bins():
     if 'user_id' not in session: return jsonify({'status':'error', 'msg':'Login required'})
     
     data = request.json
-    item_code = data.get('item')
+    item_code = data.get('item', '').strip()
     user_loc = session.get('location', 'Unknown').strip()
-    
-    # Allow Admin ('000') to see all bins, otherwise filter by user location
-    # Note: ScanOnhand2 uses 'location_id' (e.g. 'ATL   ')
     
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
         
         sql = f"""
-            SELECT bin, onhand, location_id 
+            SELECT bin, onhand, loctid 
             FROM {Config.DB_AUTH}.dbo.ScanOnhand2 
-            WHERE item=? 
+            WHERE item LIKE ? AND onhand > 0
         """
-        params = [item_code]
+        params = [f"%{item_code}%"]
         
         if user_loc != '000' and user_loc != 'Unknown':
-            sql += " AND location_id LIKE ?"
+            sql += " AND loctid LIKE ?"
             params.append(f"{user_loc}%")
             
         sql += " ORDER BY onhand DESC"
@@ -181,15 +174,53 @@ def get_item_bins():
         
         bins = []
         for row in rows:
-            # Format: "A-01-01 (Qty: 50)"
             r = row_to_dict(cursor, row)
             bins.append({
                 'bin': r['bin'].strip(),
                 'qty': int(r['onhand']),
-                'loc': r['location_id'].strip()
+                'loc': r.get('loctid', '').strip()
             })
-            
+        
         return jsonify({'status': 'success', 'bins': bins})
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'msg': str(e)})
+    finally:
+        conn.close()
+
+# --- NEW: REAL-TIME BIN VALIDATION ROUTE ---
+@app.route('/validate_bin', methods=['POST'])
+def validate_bin():
+    if 'user_id' not in session: return jsonify({'status':'error', 'msg':'Login required'})
+
+    data = request.json
+    bin_loc = data.get('bin', '').strip()
+    item_code = data.get('item', '').strip()
+    user_loc = session.get('location', 'Unknown').strip()
+
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        
+        # Check if the scanned BIN contains the SELECTED ITEM (with positive qty)
+        sql = f"""
+            SELECT TOP 1 onhand FROM {Config.DB_AUTH}.dbo.ScanOnhand2 
+            WHERE bin=? AND item LIKE ? AND onhand > 0
+        """
+        params = [bin_loc, f"%{item_code}%"]
+        
+        # Optional: Enforce User Location (don't let ATL user pick from LA bin)
+        if user_loc != '000' and user_loc != 'Unknown':
+            sql += " AND loctid LIKE ?"
+            params.append(f"{user_loc}%")
+            
+        cursor.execute(sql, tuple(params))
+        row = cursor.fetchone()
+        
+        if row:
+            return jsonify({'status': 'success'})
+        else:
+            return jsonify({'status': 'error', 'msg': f"❌ Item '{item_code}' is NOT in Bin '{bin_loc}'"})
 
     except Exception as e:
         return jsonify({'status': 'error', 'msg': str(e)})
@@ -202,8 +233,8 @@ def process_scan():
     
     data = request.json
     so_num = data.get('so')
-    bin_loc = data.get('bin')
-    scanned_input = data.get('item')
+    bin_loc = data.get('bin', '').strip()
+    scanned_input = data.get('item', '').strip()
     qty = float(data.get('qty', 1))
     user_loc = session.get('location', 'Unknown').strip()
     
@@ -211,7 +242,7 @@ def process_scan():
     try:
         cursor = conn.cursor()
         
-        # 1. READ & VALIDATE
+        # 1. Check Order
         sql_check = f"SELECT * FROM {Config.DB_ORDERS}.dbo.SOTRAN WHERE sono=? AND item=?"
         params = [so_num, scanned_input]
         
@@ -223,12 +254,23 @@ def process_scan():
         so_row = cursor.fetchone()
         
         if not so_row:
-            return jsonify({'status': 'error', 'msg': f'Item {scanned_input} not found for {user_loc}!'})
+            return jsonify({'status': 'error', 'msg': f'Item {scanned_input} not found on Order!'})
             
         line_data = row_to_dict(cursor, so_row)
         tran_line = line_data.get('tranlineno')
         
-        # 2. WRITE
+        # 2. Re-Check Bin (Security)
+        bin_check_sql = f"""
+            SELECT TOP 1 onhand FROM {Config.DB_AUTH}.dbo.ScanOnhand2 
+            WHERE item LIKE ? AND bin=? AND onhand > 0
+        """
+        cursor.execute(bin_check_sql, (f"%{scanned_input}%", bin_loc))
+        bin_row = cursor.fetchone()
+        
+        if not bin_row:
+             return jsonify({'status': 'error', 'msg': f"❌ Bin '{bin_loc}' does not contain '{scanned_input}'!"})
+
+        # 3. Write
         try:
             insert_sql = f"""
                 INSERT INTO {Config.DB_AUTH}.dbo.ScanBinTran2 

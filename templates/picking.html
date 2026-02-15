@@ -6,7 +6,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
-<body>
+<body style="padding-bottom: 80px;">
     <div class="container" style="max-width: 600px; margin-top: 10px;">
         
         <div class="nav-header">
@@ -47,6 +47,7 @@
                 <div class="form-group">
                     <label>Bin Location</label>
                     <input type="text" id="binInput" class="scan-input" placeholder="Scan BIN..." autocomplete="off">
+                    <small id="binStatus" style="color:red; display:none;"></small>
                 </div>
                 <div class="form-group">
                     <label>Item / UPC</label>
@@ -59,8 +60,8 @@
                 </div>
             </div>
 
-            <div class="table-responsive">
-                <table class="pick-table">
+            <div class="table-responsive" style="max-height: 300px; overflow-y: auto; border-bottom: 2px solid #ddd;">
+                <table class="pick-table" id="pickingTable">
                     <thead>
                         <tr>
                             <th width="15%">No</th>
@@ -71,11 +72,9 @@
                     </thead>
                     <tbody>
                         {% for item in items %}
-                        <tr onclick="showBins('{{ item.item }}')" style="cursor: pointer;">
+                        <tr onclick="selectRow(this, '{{ item.item }}')" class="item-row">
                             <td style="color:#718096;">{{ item.tranlineno }}</td>
-                            <td style="font-weight:bold; color:#2b6cb0;">
-                                {{ item.item }} <i class="fas fa-info-circle" style="font-size:12px; color:#cbd5e0;"></i>
-                            </td>
+                            <td style="font-weight:bold; color:#2b6cb0;">{{ item.item }}</td>
                             <td style="text-align:center;">{{ item.qtyord|int }}</td>
                             <td style="text-align:center;">
                                 {% if item.shipqty >= item.qtyord %}
@@ -96,6 +95,13 @@
                     </tbody>
                 </table>
             </div>
+
+            <div id="binButtonArea" style="display:none; margin-top:15px;">
+                <button class="btn-secondary" onclick="openBinModal()">
+                    <i class="fas fa-search"></i> View Bins for Selection
+                </button>
+            </div>
+
             {% endif %}
         </div>
     </div>
@@ -103,14 +109,14 @@
     <div id="binModal" class="modal-overlay" style="display:none;">
         <div class="modal-content">
             <div class="modal-header">
-                <h3 id="modalTitle">Bin Lookup</h3>
+                <h3 id="modalTitle">Available Bins</h3>
                 <span class="close-btn" onclick="closeModal()">&times;</span>
             </div>
             <div class="modal-body">
-                <p>Select a bin to pick from:</p>
-                <div id="binList" class="bin-list">
-                    <div style="text-align:center;">Loading...</div>
+                <div class="alert alert-info" style="margin:10px;">
+                    <i class="fas fa-info-circle"></i> Go to one of these bins and SCAN the location.
                 </div>
+                <div id="binList" class="bin-list"></div>
             </div>
             <div class="modal-footer">
                 <button onclick="closeModal()" class="btn-cancel">Close</button>
@@ -119,77 +125,81 @@
     </div>
 
     <script>
-        const soInput = document.getElementById('soInput');
-        const binInput = document.getElementById('binInput');
-        const itemInput = document.getElementById('itemInput');
+        let selectedItemCode = null;
         
-        // Auto-Focus Logic
-        document.addEventListener('click', function(e) {
-            // Don't autofocus if clicking inside the modal
-            if (document.getElementById('binModal').style.display === 'flex') return;
-
-            if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'BUTTON') {
-                if(soInput && !soInput.value) soInput.focus();
-                else if(binInput && !binInput.value) binInput.focus();
-                else if(itemInput && !itemInput.value) itemInput.focus();
-            }
-        });
-
-        // --- NEW: BIN LOOKUP LOGIC ---
-        function showBins(itemCode) {
-            const modal = document.getElementById('binModal');
-            const list = document.getElementById('binList');
-            document.getElementById('modalTitle').innerText = itemCode;
+        // --- SELECTION LOGIC ---
+        function selectRow(row, itemCode) {
+            const rows = document.querySelectorAll('.item-row');
+            rows.forEach(r => r.classList.remove('active-row'));
+            row.classList.add('active-row');
             
-            modal.style.display = 'flex'; // Show Modal
-            list.innerHTML = '<div style="padding:20px; text-align:center;"><i class="fas fa-spinner fa-spin"></i> Finding Bins...</div>';
+            selectedItemCode = itemCode;
+            document.getElementById('binButtonArea').style.display = 'block';
+            
+            // Auto-focus Bin Input
+            if(document.getElementById('binInput')) {
+                document.getElementById('binInput').value = '';
+                document.getElementById('itemInput').value = '';
+                document.getElementById('binInput').focus();
+            }
+        }
 
-            fetch('/get_item_bins', {
+        // --- REAL-TIME BIN VALIDATION ---
+        function validateBin() {
+            const binVal = document.getElementById('binInput').value.trim();
+            if(!binVal || !selectedItemCode) return;
+
+            // Show checking state (optional)
+            // document.getElementById('binStatus').style.display = 'none';
+
+            fetch('/validate_bin', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({item: itemCode})
+                body: JSON.stringify({
+                    bin: binVal,
+                    item: selectedItemCode
+                })
             })
             .then(response => response.json())
             .then(data => {
-                list.innerHTML = '';
-                if(data.bins.length === 0) {
-                    list.innerHTML = '<div style="color:red; padding:10px;">No Stock Found in your Warehouse!</div>';
+                if(data.status === 'success') {
+                    // Success! Move to Item Input
+                    document.getElementById('itemInput').focus();
                 } else {
-                    data.bins.forEach(bin => {
-                        // Create clickable bin row
-                        const row = document.createElement('div');
-                        row.className = 'bin-row';
-                        row.innerHTML = `
-                            <span class="bin-name">${bin.bin}</span>
-                            <span class="bin-qty">Qty: ${bin.qty}</span>
-                        `;
-                        // Action: Click bin to auto-fill inputs
-                        row.onclick = function() {
-                            if(binInput) binInput.value = bin.bin;
-                            if(itemInput) itemInput.value = itemCode;
-                            closeModal();
-                            if(itemInput) itemInput.focus(); // Move focus to item to confirm scan
-                        };
-                        list.appendChild(row);
-                    });
+                    // Fail! Alert and Clear
+                    alert(data.msg);
+                    document.getElementById('binInput').value = '';
+                    document.getElementById('binInput').focus();
                 }
-            });
+            })
+            .catch(err => console.error(err));
         }
 
-        function closeModal() {
-            document.getElementById('binModal').style.display = 'none';
-            if(binInput && !binInput.value) binInput.focus();
-        }
-
-        // --- SUBMIT LOGIC ---
+        // --- SUBMIT LOGIC (FINAL PICK) ---
         function submitScan() {
+            const scanBin = document.getElementById('binInput').value.trim();
+            const scanItem = document.getElementById('itemInput').value.trim();
+            
+            if(!selectedItemCode) {
+                alert("⚠️ Please tap a Line Item first!");
+                return;
+            }
+
+            // Frontend Item Check
+            if(!scanItem.includes(selectedItemCode.trim()) && !selectedItemCode.includes(scanItem)) {
+                alert("⛔ WRONG ITEM! \nYou selected: " + selectedItemCode + "\nYou scanned: " + scanItem);
+                document.getElementById('itemInput').value = '';
+                document.getElementById('itemInput').focus();
+                return;
+            }
+
             const btn = document.querySelector('.btn-pick');
-            if(btn) { btn.disabled = true; btn.innerText = "..."; }
+            if(btn) { btn.disabled = true; btn.innerText = "Checking..."; }
 
             const data = {
                 so: "{{ so }}",
-                bin: binInput ? binInput.value : '',
-                item: itemInput ? itemInput.value : '',
+                bin: scanBin,
+                item: scanItem,
                 qty: document.getElementById('qtyInput').value
             };
 
@@ -201,30 +211,89 @@
             .then(response => response.json())
             .then(data => {
                 if(btn) { btn.disabled = false; btn.innerText = "PICK"; }
+                
                 if(data.status === 'success') {
                     location.reload(); 
                 } else {
                     alert("❌ " + data.msg);
-                    if(itemInput) { itemInput.value = ''; itemInput.focus(); }
+                    // Smart Reset based on error type
+                    if(data.msg.includes("Bin")) {
+                        document.getElementById('binInput').value = '';
+                        document.getElementById('binInput').focus();
+                    } else {
+                        document.getElementById('itemInput').value = '';
+                        document.getElementById('itemInput').focus();
+                    }
                 }
-            })
-            .catch(err => {
-                alert("Network Error");
-                if(btn) btn.disabled = false;
+            });
+        }
+
+        // --- KEYPRESS HANDLERS ---
+        const soInput = document.getElementById('soInput');
+        const binInput = document.getElementById('binInput');
+        const itemInput = document.getElementById('itemInput');
+
+        if(binInput) {
+            binInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault(); // Stop form submit
+                    if(!selectedItemCode) {
+                        alert("Select an item from the list first!");
+                        return;
+                    }
+                    validateBin(); // Trigger immediate validation
+                }
             });
         }
 
         if(itemInput) {
             itemInput.addEventListener('keypress', function (e) {
                 if (e.key === 'Enter') {
+                    e.preventDefault();
                     if (binInput.value === "") binInput.focus();
                     else submitScan();
                 }
             });
-            binInput.addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') itemInput.focus();
+        }
+
+        // --- MODAL LOGIC (UNCHANGED) ---
+        function openBinModal() {
+            if(!selectedItemCode) return;
+            const modal = document.getElementById('binModal');
+            const list = document.getElementById('binList');
+            document.getElementById('modalTitle').innerText = selectedItemCode;
+            
+            modal.style.display = 'flex';
+            list.innerHTML = '<div style="padding:20px; text-align:center;"><i class="fas fa-spinner fa-spin"></i> Finding Stock...</div>';
+
+            fetch('/get_item_bins', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({item: selectedItemCode})
+            })
+            .then(response => response.json())
+            .then(data => {
+                list.innerHTML = '';
+                if(data.bins.length === 0) {
+                    list.innerHTML = '<div style="color:red; padding:10px;">No Stock Found!</div>';
+                } else {
+                    data.bins.forEach(bin => {
+                        const row = document.createElement('div');
+                        row.className = 'bin-row';
+                        row.innerHTML = `
+                            <span class="bin-name">${bin.bin}</span>
+                            <span class="bin-qty">Qty: ${bin.qty}</span>
+                        `;
+                        row.onclick = function() {
+                            closeModal();
+                            document.getElementById('binInput').focus();
+                        };
+                        list.appendChild(row);
+                    });
+                }
             });
         }
+        function closeModal() { document.getElementById('binModal').style.display = 'none'; }
     </script>
 </body>
 </html>
