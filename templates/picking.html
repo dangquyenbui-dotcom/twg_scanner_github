@@ -661,12 +661,8 @@
             bins.forEach(bin => {
                 const row = document.createElement('div');
                 row.className = 'bin-row';
+                // Only display information; NO onclick handler added here.
                 row.innerHTML = `<span class="bin-name">${bin.bin}</span><span class="bin-qty">Qty: ${bin.qty}</span>`;
-                row.onclick = function() { 
-                    closeModal('binModal'); 
-                    document.getElementById('binInput').value = bin.bin; 
-                    validateBin(); 
-                };
                 list.appendChild(row);
             });
         }
