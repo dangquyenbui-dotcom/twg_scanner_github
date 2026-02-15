@@ -146,7 +146,11 @@ def login():
 @app.route('/dashboard')
 def dashboard():
     if 'user_id' not in session: return redirect(url_for('login'))
-    return render_template('dashboard.html')
+    # Pass current system time to the dashboard
+    now = datetime.datetime.now()
+    return render_template('dashboard.html', 
+                           date=now.strftime('%b %d, %Y'), 
+                           time=now.strftime('%I:%M %p'))
 
 @app.route('/picking', methods=['GET'])
 def picking_menu():
@@ -290,7 +294,6 @@ def process_batch_scan():
     """
     CRITICAL: This function processes the batch.
     It uses DB Transactions to ensure partial failures do not corrupt data.
-    Now supports batch_id for tracking.
     """
     if 'user_id' not in session: return jsonify({'status':'error', 'msg':'Session expired'})
     detect_columns()
@@ -298,7 +301,7 @@ def process_batch_scan():
     data = request.json
     picks = data.get('picks', [])
     so_num = data.get('so', '')
-    batch_id = data.get('batch_id', str(uuid.uuid4())) # Use provided or generate new
+    batch_id = data.get('batch_id', str(uuid.uuid4()))
     user_id = session.get('user_id')
     
     if not picks:
@@ -314,7 +317,6 @@ def process_batch_scan():
         cursor = conn.cursor()
         
         # --- START TRANSACTION ---
-        
         processed_count = 0
         
         for pick in picks:
@@ -325,7 +327,7 @@ def process_batch_scan():
 
             if qty <= 0: continue
 
-            # 1. SERVER-SIDE VALIDATION: Check Order Line Status AGAIN
+            # 1. SERVER-SIDE VALIDATION
             sql_check_so = f"""
                 SELECT (qtyord - shipqty) as remaining 
                 FROM {Config.DB_ORDERS}.dbo.SOTRAN 
@@ -374,7 +376,6 @@ def process_batch_scan():
                     (item, bin, qty, userid, datetime, sono, type, upc)
                     VALUES (?, ?, ?, ?, GETDATE(), ?, 'PICK', ?)
                 """
-                # Note: We could store batch_id here if schema supported it.
                 cursor.execute(insert_hist_sql, (scanned_item, bin_loc, qty, user_id, so_num, upc_code))
 
             processed_count += 1
@@ -389,7 +390,7 @@ def process_batch_scan():
         return jsonify({'status': 'success', 'msg': status_msg, 'batch_id': batch_id})
 
     except Exception as e:
-        conn.rollback() # CRITICAL: Undo everything
+        conn.rollback() # Undo everything
         logging.error(f"Batch {batch_id} Failed: {e}")
         return jsonify({'status': 'error', 'msg': f"Batch Failed: {str(e)}"})
     finally:
