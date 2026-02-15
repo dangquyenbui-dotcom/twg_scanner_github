@@ -3,6 +3,7 @@ from config import Config
 import pyodbc
 import logging
 import datetime
+import uuid
 
 # Configure Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -19,7 +20,7 @@ DB_COLS = {
 }
 
 def get_db_connection():
-    """Establishes a connection to the SQL Server."""
+    """Establishes a connection to the SQL Server with explicit timeout."""
     conn_str = (
         f"DRIVER={app.config['DB_DRIVER']};"
         f"SERVER={app.config['DB_SERVER']};"
@@ -28,7 +29,8 @@ def get_db_connection():
         f"PWD={app.config['DB_PWD']};"
     )
     try:
-        return pyodbc.connect(conn_str, timeout=10, autocommit=False) # autocommit=False for Transactions
+        # Increased timeout for unstable networks
+        return pyodbc.connect(conn_str, timeout=15, autocommit=False) 
     except Exception as e:
         logging.error(f"DB Connection Failed: {e}")
         return None
@@ -85,6 +87,11 @@ def detect_columns():
 
 # --- ROUTES ---
 
+@app.route('/health')
+def health_check():
+    """Lightweight endpoint for client to check connectivity."""
+    return jsonify({'status': 'online', 'time': datetime.datetime.now().isoformat()})
+
 @app.route('/')
 def index():
     if 'user_id' not in session: return redirect(url_for('login'))
@@ -99,7 +106,7 @@ def login():
         
         conn = get_db_connection()
         if not conn:
-            flash("❌ Database Offline.", "error")
+            flash("❌ Database Offline. Check Server Connection.", "error")
             return render_template('login.html')
             
         try:
@@ -168,7 +175,6 @@ def picking_menu():
             user_loc = session.get('location', 'Unknown').strip()
             
             # 2. Fetch Open Lines
-            # We explicitly fetch tranlineno to handle split lines correctly
             base_sql = f"""
                 SELECT tranlineno, item, qtyord, shipqty, (qtyord - shipqty) as remaining, loctid 
                 FROM {Config.DB_ORDERS}.dbo.SOTRAN 
@@ -176,8 +182,7 @@ def picking_menu():
             """
             params = [resolved_so]
             
-            # Location Fencing: If User is ATL, only show ATL lines. 
-            # '000' is usually Admin/Headquarters
+            # Location Fencing
             if user_loc != '000' and user_loc != 'Unknown':
                 base_sql += " AND loctid LIKE ?"
                 params.append(f"{user_loc}%")
@@ -194,7 +199,7 @@ def picking_menu():
         except Exception as e:
             flash(f"Database Error: {str(e)}", "error")
         finally:
-            conn.close()
+            if conn: conn.close()
             
     return render_template('picking.html', so=resolved_so, items=order_items)
 
@@ -241,7 +246,7 @@ def get_item_bins():
     except Exception as e:
         return jsonify({'status': 'error', 'msg': str(e)})
     finally:
-        conn.close()
+        if conn: conn.close()
 
 @app.route('/validate_bin', methods=['POST'])
 def validate_bin():
@@ -278,13 +283,14 @@ def validate_bin():
     except Exception as e:
         return jsonify({'status': 'error', 'msg': str(e)})
     finally:
-        conn.close()
+        if conn: conn.close()
 
 @app.route('/process_batch_scan', methods=['POST'])
 def process_batch_scan():
     """
     CRITICAL: This function processes the batch.
     It uses DB Transactions to ensure partial failures do not corrupt data.
+    Now supports batch_id for tracking.
     """
     if 'user_id' not in session: return jsonify({'status':'error', 'msg':'Session expired'})
     detect_columns()
@@ -292,14 +298,17 @@ def process_batch_scan():
     data = request.json
     picks = data.get('picks', [])
     so_num = data.get('so', '')
+    batch_id = data.get('batch_id', str(uuid.uuid4())) # Use provided or generate new
     user_id = session.get('user_id')
     
     if not picks:
         return jsonify({'status': 'error', 'msg': 'No picks to submit!'})
 
+    logging.info(f"Processing Batch {batch_id} for SO {so_num} with {len(picks)} lines.")
+
     conn = get_db_connection()
     if not conn:
-        return jsonify({'status': 'error', 'msg': 'Database Unavailable'})
+        return jsonify({'status': 'error', 'msg': 'Database Unavailable - Try Again'})
 
     try:
         cursor = conn.cursor()
@@ -312,7 +321,7 @@ def process_batch_scan():
             scanned_item = pick.get('item', '').strip()
             bin_loc = pick.get('bin', '').strip()
             qty = float(pick.get('qty', 0))
-            tran_line = pick.get('lineNo') # IMPORTANT: We now pass the specific line number
+            tran_line = pick.get('lineNo')
 
             if qty <= 0: continue
 
@@ -326,11 +335,11 @@ def process_batch_scan():
             so_row = cursor.fetchone()
             
             if not so_row:
-                 raise Exception(f"Order Line {tran_line} for {scanned_item} no longer exists or was closed.")
+                 raise Exception(f"Line {tran_line} ({scanned_item}) closed or invalid.")
             
             remaining_so = float(so_row[0])
             if qty > remaining_so:
-                raise Exception(f"Over-shipment detected for {scanned_item}. Needed {remaining_so}, tried to pick {qty}.")
+                raise Exception(f"Over-shipment: {scanned_item}. Need {remaining_so}, Tried {qty}.")
 
             # 2. SERVER-SIDE VALIDATION & UPDATE
             if not Config.SIMULATION_MODE:
@@ -343,7 +352,7 @@ def process_batch_scan():
                 cursor.execute(update_inv_sql, (qty, bin_loc, scanned_item, qty))
                 
                 if cursor.rowcount == 0:
-                     raise Exception(f"Inventory Conflict! Not enough stock in {bin_loc} for {scanned_item}.")
+                     raise Exception(f"Stock Conflict! {bin_loc} doesn't have {qty} of {scanned_item}.")
 
                 # B. Update Sales Order (Ship Qty)
                 update_so_sql = f"""
@@ -365,6 +374,7 @@ def process_batch_scan():
                     (item, bin, qty, userid, datetime, sono, type, upc)
                     VALUES (?, ?, ?, ?, GETDATE(), ?, 'PICK', ?)
                 """
+                # Note: We could store batch_id here if schema supported it.
                 cursor.execute(insert_hist_sql, (scanned_item, bin_loc, qty, user_id, so_num, upc_code))
 
             processed_count += 1
@@ -372,18 +382,18 @@ def process_batch_scan():
         # --- COMMIT TRANSACTION ---
         conn.commit()
         
-        status_msg = f"Successfully saved {processed_count} lines."
+        status_msg = f"Saved {processed_count} lines."
         if Config.SIMULATION_MODE:
-             status_msg = f"SIMULATION: {processed_count} lines passed validation (No DB changes)."
+             status_msg = f"SIMULATION SUCCESS: {processed_count} lines (No DB write)."
 
-        return jsonify({'status': 'success', 'msg': status_msg})
+        return jsonify({'status': 'success', 'msg': status_msg, 'batch_id': batch_id})
 
     except Exception as e:
-        conn.rollback() # CRITICAL: Undo everything if even one line fails
-        logging.error(f"Batch Transaction Failed: {e}")
+        conn.rollback() # CRITICAL: Undo everything
+        logging.error(f"Batch {batch_id} Failed: {e}")
         return jsonify({'status': 'error', 'msg': f"Batch Failed: {str(e)}"})
     finally:
-        conn.close()
+        if conn: conn.close()
 
 @app.route('/logout')
 def logout():

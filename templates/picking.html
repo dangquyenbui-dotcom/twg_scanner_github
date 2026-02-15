@@ -1,13 +1,19 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Picking - {{ so }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
-<body>
-    <div class="container" style="max-width: 600px; margin-top: 10px; margin-bottom: 60px;">
+<body style="padding-top: 40px;"> <div id="statusBar" class="status-bar status-online">
+        <span id="statusText"><i class="fas fa-wifi"></i> SYSTEM ONLINE</span>
+        <span id="pendingCount" style="display:none; margin-left:10px; background:rgba(0,0,0,0.2); padding:2px 6px; border-radius:4px; font-size:11px;">
+            0 Pending
+        </span>
+    </div>
+
+    <div class="container" style="max-width: 600px; margin-bottom: 60px;">
         
         <div class="nav-header">
             <a href="/dashboard" class="back-btn"><i class="fas fa-chevron-left"></i> Home</a>
@@ -22,10 +28,12 @@
             {% endif %}
         {% endwith %}
 
+        <div id="toastContainer" class="toast-container"></div>
+
         <div class="scanner-card">
             {% if not so %}
             <div style="text-align:center; padding: 40px 20px;">
-                <div class="icon-circle bg-blue" style="margin: 0 auto 20px auto; width: 80px; height: 80px; font-size: 32px;">
+                <div class="icon-circle bg-blue" style="margin: 0 auto 20px auto;">
                     <i class="fas fa-barcode"></i>
                 </div>
                 <h3 style="color: #4a5568;">Scan Sales Order</h3>
@@ -124,8 +132,8 @@
             </div>
 
             <div id="binButtonArea" style="display:none; margin-top:15px;">
-                <button class="btn-secondary" onclick="openBinModal()">
-                    <i class="fas fa-search"></i> View Bins for Selection
+                <button class="btn-secondary" id="btnViewBins" onclick="openBinModal()">
+                    <i class="fas fa-search"></i> View Bins
                 </button>
             </div>
 
@@ -135,7 +143,7 @@
                 <button class="btn-action" style="background:#718096; flex:1;" onclick="openReviewModal()">
                     <i class="fas fa-list"></i> Scanned (<span id="scanCount">0</span>)
                 </button>
-                <button class="btn-action" style="background:#38a169; flex:1;" onclick="submitFinal()">
+                <button id="btnSubmit" class="btn-action" style="background:#38a169; flex:1;" onclick="submitFinal()">
                     <i class="fas fa-paper-plane"></i> Submit
                 </button>
             </div>
@@ -188,18 +196,67 @@
     </div>
 
     <script>
-        // --- GLOBAL STATE ---
+        // --- GLOBAL VARIABLES ---
+        const SO_NUMBER = "{{ so }}";
+        
+        let sessionPicks = [];
+        let binCache = {}; // Cache: { 'ITEM001': [{bin:'A1', qty:10}, ...] }
         let selectedItemCode = null;
         let selectedLineNo = null; 
+        
         let currentBinMaxQty = 999999;
         let currentOrderMaxQty = 999999; 
-        let isAutoMode = true;
         let currentBin = ""; 
-        let sessionPicks = [];
+        
+        let isAutoMode = true;
+        let isSubmitting = false;
 
-        const SO_NUMBER = "{{ so }}";
+        // --- AUDIO SYSTEM ---
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playBeep(type) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            
+            if (type === 'success') {
+                osc.frequency.value = 1200;
+                gain.gain.value = 0.1;
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.1);
+            } else if (type === 'error') {
+                osc.frequency.value = 200;
+                gain.gain.value = 0.2;
+                osc.type = 'sawtooth';
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.4);
+            }
+        }
 
-        // --- LIFECYCLE: LOAD SAVED DATA ---
+        // --- NETWORK & STATUS BAR LOGIC ---
+        function updateStatusUI(online) {
+            const bar = document.getElementById('statusBar');
+            const txt = document.getElementById('statusText');
+            
+            if (online) {
+                bar.classList.remove('status-offline');
+                bar.classList.add('status-online');
+                txt.innerHTML = '<i class="fas fa-wifi"></i> ONLINE';
+            } else {
+                bar.classList.remove('status-online');
+                bar.classList.add('status-offline');
+                txt.innerHTML = '<i class="fas fa-ban"></i> OFFLINE';
+            }
+        }
+
+        // Listen for Browser Events
+        window.addEventListener('online', () => updateStatusUI(true));
+        window.addEventListener('offline', () => updateStatusUI(false));
+        // Check on load
+        updateStatusUI(navigator.onLine);
+
+        // --- CACHING & DATA LOADING ---
         window.onload = function() {
             if(SO_NUMBER) {
                 loadFromLocal();
@@ -211,38 +268,81 @@
             }
         };
 
-        // --- LOCAL STORAGE (CRASH PROTECTION) ---
         function saveToLocal() {
             if(!SO_NUMBER) return;
-            const key = `twg_picks_${SO_NUMBER}`;
-            localStorage.setItem(key, JSON.stringify(sessionPicks));
+            if (!localStorage.getItem(`twg_batch_id_${SO_NUMBER}`)) {
+                localStorage.setItem(`twg_batch_id_${SO_NUMBER}`, crypto.randomUUID());
+            }
+            localStorage.setItem(`twg_picks_${SO_NUMBER}`, JSON.stringify(sessionPicks));
+            
+            // Show pending count in status bar
+            const pendingEl = document.getElementById('pendingCount');
+            if(sessionPicks.length > 0) {
+                pendingEl.style.display = 'inline-block';
+                pendingEl.innerText = `${sessionPicks.length} Pending`;
+            } else {
+                pendingEl.style.display = 'none';
+            }
         }
 
         function loadFromLocal() {
             if(!SO_NUMBER) return;
-            const key = `twg_picks_${SO_NUMBER}`;
-            const saved = localStorage.getItem(key);
+            const saved = localStorage.getItem(`twg_picks_${SO_NUMBER}`);
             if(saved) {
-                try {
-                    sessionPicks = JSON.parse(saved);
-                } catch(e) { console.error("Save file corrupt"); }
+                try { sessionPicks = JSON.parse(saved); } 
+                catch(e) { console.error("Save file corrupt"); }
             }
         }
 
         function clearLocal() {
             if(!SO_NUMBER) return;
             localStorage.removeItem(`twg_picks_${SO_NUMBER}`);
+            localStorage.removeItem(`twg_batch_id_${SO_NUMBER}`);
             sessionPicks = [];
             updateSessionDisplay();
+            saveToLocal(); // Clear the pending count UI
         }
 
-        // --- UI LOGIC ---
+        // --- BIN PRE-FETCHING (THE HICCUP FIX) ---
+        async function prefetchBins(item) {
+            // If we already have it in cache, do nothing
+            if (binCache[item]) return;
+
+            // Update UI to show we are "thinking" (optional, mainly for debugging)
+            const btn = document.getElementById('btnViewBins');
+            if(btn) btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Loading...';
+
+            if (!navigator.onLine) {
+                if(btn) btn.innerHTML = '<i class="fas fa-search"></i> View Bins';
+                return; // Can't fetch if offline
+            }
+
+            try {
+                const response = await fetch('/get_item_bins', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({item: item})
+                });
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    binCache[item] = data.bins; // Store in RAM
+                    console.log(`Cached ${data.bins.length} bins for ${item}`);
+                }
+            } catch (err) {
+                console.warn("Background fetch failed:", err);
+            } finally {
+                // Restore button text
+                if(btn) btn.innerHTML = '<i class="fas fa-search"></i> View Bins';
+            }
+        }
+
+        // --- UI INTERACTION ---
 
         function updateMode() {
             const modeEl = document.querySelector('input[name="pickMode"]:checked');
             if(!modeEl) return;
-            const mode = modeEl.value;
-            isAutoMode = (mode === 'auto');
+            isAutoMode = (modeEl.value === 'auto');
             
             const qtyInput = document.getElementById('qtyInput');
             const btnMinus = document.getElementById('btnMinus');
@@ -250,29 +350,20 @@
             const addBtnContainer = document.getElementById('addBtnContainer');
 
             if (isAutoMode) {
-                // AUTO MODE: Clean "Scoreboard" look
                 qtyInput.readOnly = true;
                 qtyInput.classList.add('qty-input-auto');
                 qtyInput.classList.remove('qty-input-manual');
-                
-                // Hide Buttons
                 btnMinus.classList.add('d-none');
                 btnPlus.classList.add('d-none');
                 addBtnContainer.classList.add('d-none'); 
-                
                 if(currentBin) document.getElementById('itemInput').focus();
-
             } else {
-                // MANUAL MODE: Controls visible
                 qtyInput.readOnly = false;
                 qtyInput.classList.add('qty-input-manual');
                 qtyInput.classList.remove('qty-input-auto');
-                
-                // Show Buttons
                 btnMinus.classList.remove('d-none');
                 btnPlus.classList.remove('d-none');
                 addBtnContainer.classList.remove('d-none'); 
-                
                 qtyInput.focus();
                 qtyInput.select();
             }
@@ -280,20 +371,15 @@
 
         function adjustQty(amount) {
             if(isAutoMode) return; 
-            
             const input = document.getElementById('qtyInput');
             let val = parseFloat(input.value) || 0;
-            val += amount;
-            
-            if(val < 0) val = 0;
-            
+            val = Math.max(0, val + amount);
             input.value = val;
             input.focus();
         }
 
         function selectRow(row, itemCode, remainingQty, lineNo) {
-            const rows = document.querySelectorAll('.item-row');
-            rows.forEach(r => r.classList.remove('active-row'));
+            document.querySelectorAll('.item-row').forEach(r => r.classList.remove('active-row'));
             row.classList.add('active-row');
             
             selectedItemCode = itemCode;
@@ -301,6 +387,8 @@
             currentOrderMaxQty = remainingQty; 
             
             document.getElementById('binButtonArea').style.display = 'block';
+            
+            // RESET INPUTS
             document.getElementById('binInput').value = '';
             document.getElementById('itemInput').value = '';
             
@@ -308,6 +396,9 @@
             
             currentBinMaxQty = 999999; 
             document.getElementById('binInput').focus();
+
+            // *** TRIGGER BACKGROUND CACHE ***
+            prefetchBins(itemCode);
         }
 
         function updateSessionDisplay() {
@@ -330,54 +421,88 @@
             }
         }
 
+        function showToast(msg, type='info') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.innerText = msg;
+            container.appendChild(toast);
+            
+            if(type === 'error') playBeep('error');
+            else if(type === 'success') playBeep('success');
+
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // --- VALIDATION & SCANNING ---
+
         function validateBin() {
             const binVal = document.getElementById('binInput').value.trim();
             if(!binVal || !selectedItemCode) return;
+
+            // 1. Check Cache First (Instant Offline Check)
+            if (binCache[selectedItemCode]) {
+                const foundBin = binCache[selectedItemCode].find(b => b.bin === binVal);
+                if (foundBin) {
+                    currentBinMaxQty = foundBin.qty;
+                    currentBin = binVal;
+                    showToast(`Bin Verified (Cache). Max: ${foundBin.qty}`, 'success');
+                    document.getElementById('itemInput').focus();
+                    return;
+                }
+                // If in cache but not found, it might be a new bin not in cache, so we continue to server check
+            }
+
+            // 2. Server Check (if Online)
+            if (!navigator.onLine) {
+                 // Offline and not in cache?
+                 showToast("Offline: Cannot verify new bin.", 'warning');
+                 // Allow optimistic override? For now, let's block to be safe.
+                 return;
+            }
 
             fetch('/validate_bin', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ bin: binVal, item: selectedItemCode })
             })
-            .then(response => response.json())
+            .then(res => res.json())
             .then(data => {
                 if(data.status === 'success') {
                     currentBinMaxQty = data.onhand;
                     currentBin = binVal; 
+                    showToast(`Bin Verified. Max: ${data.onhand}`, 'success');
                     document.getElementById('itemInput').focus();
                 } else {
-                    alert(data.msg);
+                    showToast(data.msg, 'error');
                     document.getElementById('binInput').value = '';
-                    document.getElementById('binInput').focus();
                 }
             })
-            .catch(err => alert("Network Error: " + err));
+            .catch(err => showToast("Network Error", 'error'));
         }
 
         function addToSession() {
-            if(!selectedItemCode) { alert("Select item row first!"); return; }
+            if(!selectedItemCode) { showToast("Select item row first!", 'warning'); return; }
             
             const inputBin = document.getElementById('binInput').value.trim();
             if(inputBin !== currentBin) {
-                alert("Please validate bin first (Press Enter on Bin field)");
+                showToast("Validate bin first (Press Enter)", 'warning');
                 return;
             }
 
-            let qtyToAdd = 0;
-            if(isAutoMode) {
-                qtyToAdd = 1; 
-            } else {
-                qtyToAdd = parseFloat(document.getElementById('qtyInput').value) || 0;
-                if(qtyToAdd <= 0) return;
-            }
+            let qtyToAdd = isAutoMode ? 1 : (parseFloat(document.getElementById('qtyInput').value) || 0);
+            if(qtyToAdd <= 0) return;
 
-            // --- CHECKS ---
+            // Checks
             const picksInBin = sessionPicks
                 .filter(p => p.item === selectedItemCode && p.bin === currentBin)
                 .reduce((sum, p) => sum + p.qty, 0);
             
             if(picksInBin + qtyToAdd > currentBinMaxQty) {
-                alert(`⛔ BIN LIMIT!\nBin ${currentBin} only has ${currentBinMaxQty}.\nYou already picked ${picksInBin}.`);
+                showToast(`BIN LIMIT: Only ${currentBinMaxQty} available.`, 'error');
                 return;
             }
 
@@ -386,11 +511,11 @@
                 .reduce((sum, p) => sum + p.qty, 0);
             
             if(totalPickedForLine + qtyToAdd > currentOrderMaxQty) {
-                alert(`⛔ ORDER LIMIT!\nLine needs ${currentOrderMaxQty}.\nYou have ${totalPickedForLine}.`);
+                showToast(`ORDER LIMIT: Line full.`, 'error');
                 return;
             }
 
-            // ADD TO STATE
+            // ADD
             sessionPicks.push({
                 id: Date.now(),
                 lineNo: selectedLineNo,
@@ -400,14 +525,15 @@
             });
 
             saveToLocal();
-
-            // Feedback Animation
+            
+            // Animation
             const qtyBox = document.getElementById('qtyInput');
             qtyBox.classList.remove('flash-active');
             void qtyBox.offsetWidth; 
             qtyBox.classList.add('flash-active');
 
             updateSessionDisplay();
+            showToast(`Added ${qtyToAdd} x ${selectedItemCode}`, 'success');
             
             document.getElementById('itemInput').value = '';
             if(isAutoMode) document.getElementById('itemInput').focus();
@@ -417,8 +543,9 @@
             const scanItem = document.getElementById('itemInput').value.trim();
             if(!selectedItemCode) return;
 
-            if(!scanItem.includes(selectedItemCode.trim()) && !selectedItemCode.includes(scanItem)) {
-                alert("⛔ Wrong Item Scanned!");
+            if(!scanItem.toLowerCase().includes(selectedItemCode.trim().toLowerCase()) && 
+               !selectedItemCode.toLowerCase().includes(scanItem.toLowerCase())) {
+                showToast("Wrong Item Scanned!", 'error');
                 document.getElementById('itemInput').value = '';
                 return;
             }
@@ -430,65 +557,135 @@
             }
         }
 
+        // --- SUBMISSION ---
+
         function submitFinal() {
-            if(sessionPicks.length === 0) { alert("Nothing scanned!"); return; }
+            if(isSubmitting) return; 
+            if(sessionPicks.length === 0) { showToast("Nothing scanned!", 'warning'); return; }
+            
+            if(!navigator.onLine) { 
+                alert("You are currently OFFLINE.\n\nPlease move to a Wi-Fi area.\nThe system will automatically detect connection."); 
+                return; 
+            }
+
             if(!confirm(`Submit ${sessionPicks.length} pick records?`)) return;
 
-            const btn = document.querySelector('.btn-action[onclick="submitFinal()"]');
+            isSubmitting = true;
+            const btn = document.getElementById('btnSubmit');
             const originalText = btn.innerHTML;
             btn.innerHTML = "<i class='fas fa-spinner fa-spin'></i> Sending...";
             btn.disabled = true;
+
+            const batchId = localStorage.getItem(`twg_batch_id_${SO_NUMBER}`);
 
             fetch('/process_batch_scan', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     so: SO_NUMBER,
-                    picks: sessionPicks
+                    picks: sessionPicks,
+                    batch_id: batchId
                 })
             })
             .then(response => response.json())
             .then(data => {
                 if(data.status === 'success') {
-                    alert(data.msg);
+                    showToast("Submission Successful!", 'success');
                     clearLocal();
-                    location.reload(); 
+                    setTimeout(() => location.reload(), 1500);
                 } else {
-                    alert("❌ Error: " + data.msg);
+                    alert("SERVER ERROR: " + data.msg);
+                    isSubmitting = false;
                     btn.innerHTML = originalText;
                     btn.disabled = false;
                 }
             })
             .catch(err => {
-                alert("Network/Server Error: " + err);
+                alert("NETWORK FAILED during submission.\nScans saved safely.");
+                isSubmitting = false;
                 btn.innerHTML = originalText;
                 btn.disabled = false;
             });
         }
 
+        // --- MODALS ---
+
+        function openBinModal() {
+            if(!selectedItemCode) return;
+            const modal = document.getElementById('binModal');
+            const list = document.getElementById('binList');
+            modal.style.display = 'flex';
+            list.innerHTML = '';
+
+            // 1. USE CACHE IF AVAILABLE (Instant!)
+            if (binCache[selectedItemCode]) {
+                populateBinList(binCache[selectedItemCode]);
+                return;
+            }
+
+            // 2. FETCH IF NOT CACHED
+            list.innerHTML = '<p style="padding:15px;">Loading from Server...</p>';
+            
+            if(!navigator.onLine) {
+                list.innerHTML = '<div style="color:red; padding:20px;">OFFLINE - Cannot fetch bins</div>';
+                return;
+            }
+
+            fetch('/get_item_bins', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({item: selectedItemCode})
+            })
+            .then(res => res.json())
+            .then(data => {
+                list.innerHTML = '';
+                if(data.status === 'success') {
+                    binCache[selectedItemCode] = data.bins; // Save to Cache
+                    populateBinList(data.bins);
+                } else {
+                    list.innerHTML = `<div style="padding:15px; color:red;">${data.msg}</div>`;
+                }
+            })
+            .catch(err => {
+                list.innerHTML = '<div style="color:red; padding:20px;">Connection Failed</div>';
+            });
+        }
+
+        function populateBinList(bins) {
+            const list = document.getElementById('binList');
+            list.innerHTML = '';
+            if(!bins || bins.length === 0) {
+                list.innerHTML = '<div style="color:red; padding:20px;">No Stock Found!</div>';
+                return;
+            }
+            bins.forEach(bin => {
+                const row = document.createElement('div');
+                row.className = 'bin-row';
+                row.innerHTML = `<span class="bin-name">${bin.bin}</span><span class="bin-qty">Qty: ${bin.qty}</span>`;
+                row.onclick = function() { 
+                    closeModal('binModal'); 
+                    document.getElementById('binInput').value = bin.bin; 
+                    validateBin(); 
+                };
+                list.appendChild(row);
+            });
+        }
+        
+        // Standard Modal Functions
         function openReviewModal() {
             const list = document.getElementById('reviewList');
             list.innerHTML = '';
-            
             if(sessionPicks.length === 0) {
                 document.getElementById('emptyReview').style.display = 'block';
             } else {
                 document.getElementById('emptyReview').style.display = 'none';
-                const revPicks = [...sessionPicks].reverse(); 
-                
-                revPicks.forEach((p) => {
-                    const realIndex = sessionPicks.indexOf(p);
+                [...sessionPicks].reverse().forEach((p, index) => {
                     const row = document.createElement('tr');
-                    row.style.borderBottom = "1px solid #eee";
                     row.innerHTML = `
-                        <td style="padding:10px; font-weight:bold; color:#2d3748;">${p.item}</td>
-                        <td style="text-align:center; color:#4a5568;">${p.bin}</td>
-                        <td style="text-align:center; font-weight:bold; color:#2b6cb0;">${p.qty}</td>
-                        <td style="text-align:center;">
-                            <button class="btn-sm btn-danger" onclick="removePick(${realIndex})">
-                                <i class="fas fa-trash"></i>
-                            </button>
-                        </td>
+                        <td style="padding:10px;">${p.item}</td>
+                        <td style="text-align:center;">${p.bin}</td>
+                        <td style="text-align:center;">${p.qty}</td>
+                        <td style="text-align:center;"><button class="btn-sm btn-danger" onclick="removePick(${sessionPicks.length - 1 - index})"><i class="fas fa-trash"></i></button></td>
                     `;
                     list.appendChild(row);
                 });
@@ -504,48 +701,10 @@
                 updateSessionDisplay();
             }
         }
-        
-        function clearSession() {
-            if(confirm("Are you sure you want to delete ALL scans?")) {
-                clearLocal();
-                closeModal('reviewModal');
-            }
-        }
-
-        function openBinModal() {
-            if(!selectedItemCode) return;
-            const modal = document.getElementById('binModal');
-            const list = document.getElementById('binList');
-            modal.style.display = 'flex';
-            list.innerHTML = '<p>Loading...</p>';
-
-            fetch('/get_item_bins', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({item: selectedItemCode})
-            })
-            .then(response => response.json())
-            .then(data => {
-                list.innerHTML = '';
-                if(!data.bins || data.bins.length === 0) list.innerHTML = '<div style="color:red; padding:20px;">No Stock Found!</div>';
-                else {
-                    data.bins.forEach(bin => {
-                        const row = document.createElement('div');
-                        row.className = 'bin-row';
-                        row.innerHTML = `<span class="bin-name">${bin.bin}</span><span class="bin-qty">Qty: ${bin.qty}</span>`;
-                        row.onclick = function() { closeModal('binModal'); document.getElementById('binInput').value = bin.bin; validateBin(); };
-                        list.appendChild(row);
-                    });
-                }
-            })
-            .catch(err => {
-                list.innerHTML = '<div style="color:red; padding:20px;">Connection Failed</div>';
-            });
-        }
-        
+        function clearSession() { if(confirm("Delete ALL?")) { clearLocal(); closeModal('reviewModal'); } }
         function closeModal(id) { document.getElementById(id).style.display = 'none'; }
 
-        // --- EVENT LISTENERS ---
+        // Event Listeners
         const binInput = document.getElementById('binInput');
         const itemInput = document.getElementById('itemInput');
         const qtyInput = document.getElementById('qtyInput');
@@ -553,12 +712,9 @@
         if(binInput) binInput.addEventListener('keypress', e => { if(e.key==='Enter') { e.preventDefault(); validateBin(); } });
         if(itemInput) itemInput.addEventListener('keypress', e => { if(e.key==='Enter') { e.preventDefault(); handleItemScan(); } });
         if(qtyInput) qtyInput.addEventListener('keypress', e => { if(e.key==='Enter') { e.preventDefault(); addToSession(); } });
-        
-        // Prevent accidental back navigation
+
         history.pushState(null, null, location.href);
-        window.onpopstate = function () {
-            history.go(1);
-        };
+        window.onpopstate = function () { history.go(1); };
     </script>
 </body>
 </html>
