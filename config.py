@@ -1,9 +1,17 @@
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev_key_very_secret'
-    # Database Config - Loading from Environment Variables
-    DB_HOST = os.environ.get('DB_HOST') or 'localhost'
-    DB_USER = os.environ.get('DB_USER') or 'root'
-    DB_PASSWORD = os.environ.get('DB_PASSWORD') or ''
-    DB_NAME = os.environ.get('DB_NAME') or 'twg_inventory'
+    
+    # Database Credentials
+    DB_DRIVER = os.environ.get('DB_DRIVER', '{ODBC Driver 17 for SQL Server}')
+    DB_SERVER = os.environ.get('DB_SERVER')
+    DB_UID = os.environ.get('DB_UID')
+    DB_PWD = os.environ.get('DB_PWD')
+    
+    # Database Names
+    DB_AUTH = os.environ.get('DB_AUTH', 'PRO12')     # Users & Inventory
+    DB_ORDERS = os.environ.get('DB_ORDERS', 'PRO05') # Sales Orders

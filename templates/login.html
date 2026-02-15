@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TWG Warehouse</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        body { background-color: #f0f2f5; font-family: sans-serif; }
+        .login-container { 
+            max-width: 350px; 
+            margin: 60px auto; 
+            padding: 20px; 
+            background: white; 
+            border-radius: 10px; 
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
+        }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        .scan-input { 
+            width: 100%; padding: 12px; font-size: 16px; 
+            border: 2px solid #ccc; border-radius: 5px; 
+            box-sizing: border-box; /* Fixes padding width issues */
+        }
+        .btn-login { 
+            width: 100%; padding: 15px; font-size: 18px; 
+            background: #007bff; color: white; border: none; 
+            border-radius: 5px; cursor: pointer; 
+        }
+        .alert { padding: 10px; margin-bottom: 15px; border-radius: 5px; }
+        .alert-error { background: #ffebee; color: #c62828; }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <h2 style="text-align: center; color: #333;">🏭 TWG Scanner</h2>
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <form method="POST">
+            <div class="form-group">
+                <label>User ID</label>
+                <input type="text" name="userid" class="scan-input" placeholder="Scan Badge..." autofocus required autocomplete="off">
+            </div>
+            
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" name="password" class="scan-input" placeholder="Enter Password" required>
+            </div>
+
+            <button type="submit" class="btn-login">LOGIN</button>
+        </form>
+    </div>
+</body>
+</html>
