@@ -7,20 +7,12 @@
     <style>
         body { background-color: #f0f2f5; font-family: sans-serif; }
         .login-container { 
-            max-width: 350px; 
-            margin: 60px auto; 
-            padding: 20px; 
-            background: white; 
-            border-radius: 10px; 
+            max-width: 350px; margin: 60px auto; padding: 20px; 
+            background: white; border-radius: 10px; 
             box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
         }
         .form-group { margin-bottom: 20px; }
         label { display: block; margin-bottom: 5px; font-weight: bold; }
-        .scan-input { 
-            width: 100%; padding: 12px; font-size: 16px; 
-            border: 2px solid #ccc; border-radius: 5px; 
-            box-sizing: border-box; /* Fixes padding width issues */
-        }
         .btn-login { 
             width: 100%; padding: 15px; font-size: 18px; 
             background: #007bff; color: white; border: none; 
@@ -45,7 +37,9 @@
         <form method="POST">
             <div class="form-group">
                 <label>User ID</label>
-                <input type="text" name="userid" class="scan-input" placeholder="Scan Badge..." autofocus required autocomplete="off">
+                <input type="text" name="userid" id="userInput" class="scan-input" 
+                       placeholder="Scan Badge (Tap to Type)..." 
+                       autofocus required autocomplete="off" inputmode="none">
             </div>
             
             <div class="form-group">
@@ -56,5 +50,20 @@
             <button type="submit" class="btn-login">LOGIN</button>
         </form>
     </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const userInput = document.getElementById('userInput');
+            if(userInput) {
+                userInput.addEventListener('click', function() {
+                    if (this.inputMode === 'none') {
+                        this.inputMode = 'text'; // Badge might have letters? Safe default.
+                        this.blur(); 
+                        setTimeout(() => this.focus(), 50); 
+                    }
+                });
+            }
+        });
+    </script>
 </body>
 </html>

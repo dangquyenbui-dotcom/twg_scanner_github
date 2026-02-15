@@ -113,16 +113,13 @@ input.scan-input:focus {
     box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.2);
 }
 
-/* Hide Spinner on Number Inputs (Chrome/Safari/Edge) */
+/* Hide Spinner on Number Inputs */
 input[type=number]::-webkit-inner-spin-button, 
 input[type=number]::-webkit-outer-spin-button { 
   -webkit-appearance: none; 
   margin: 0; 
 }
-/* Firefox */
-input[type=number] {
-  -moz-appearance: textfield;
-}
+input[type=number] { -moz-appearance: textfield; }
 
 /* --- PICK MODE SELECTOR (COMPACT) --- */
 .mode-selector {
