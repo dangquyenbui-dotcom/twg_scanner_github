@@ -2,11 +2,12 @@
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Picking</title>
+    <title>Picking - {{ so }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
-<body> <div class="container" style="max-width: 600px; margin-top: 10px; margin-bottom: 40px;">
+<body>
+    <div class="container" style="max-width: 600px; margin-top: 10px; margin-bottom: 60px;">
         
         <div class="nav-header">
             <a href="/dashboard" class="back-btn"><i class="fas fa-chevron-left"></i> Home</a>
@@ -65,12 +66,28 @@
                 </div>
                 
                 <div class="qty-area">
-                    <div style="flex: 1;">
-                        <label style="font-size: 14px; font-weight:bold; color:#4a5568; display:block; margin-bottom:5px;">SESSION QTY</label>
-                        <input type="number" id="qtyInput" class="scan-input qty-input-large" value="0" readonly>
+                    <div style="flex: 2;">
+                        <label style="font-size: 14px; font-weight:bold; color:#4a5568; display:block; margin-bottom:5px;">
+                            SESSION QTY
+                        </label>
+                        
+                        <div class="qty-control-group">
+                            <button class="btn-qty-adjust" id="btnMinus" onclick="adjustQty(-1)">
+                                <i class="fas fa-minus"></i>
+                            </button>
+
+                            <input type="number" id="qtyInput" class="scan-input qty-input-manual" value="0">
+
+                            <button class="btn-qty-adjust" id="btnPlus" onclick="adjustQty(1)">
+                                <i class="fas fa-plus"></i>
+                            </button>
+                        </div>
                     </div>
-                    <div style="flex: 1;">
-                        <button onclick="addToSession()" class="btn-pick" style="height: 70px; font-size: 20px;">ADD</button>
+
+                    <div style="flex: 1;" id="addBtnContainer">
+                        <button onclick="addToSession()" class="btn-pick" style="height: 70px; font-size: 20px; width:100%;">
+                            ADD
+                        </button>
                     </div>
                 </div>
             </div>
@@ -79,19 +96,21 @@
                 <table class="pick-table" id="pickingTable">
                     <thead>
                         <tr>
-                            <th width="15%">No</th>
+                            <th width="15%">Ln</th>
                             <th width="45%">Item</th>
-                            <th width="20%">Order</th>
+                            <th width="20%">Need</th>
                             <th width="20%">Pick</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for item in items %}
-                        <tr onclick="selectRow(this, '{{ item.item }}', {{ item.remaining }})" class="item-row" id="row-{{ item.item }}">
+                        <tr onclick="selectRow(this, '{{ item.item }}', {{ item.remaining }}, {{ item.tranlineno }})" 
+                            class="item-row" 
+                            id="row-{{ item.tranlineno }}">
                             <td style="color:#718096;">{{ item.tranlineno }}</td>
                             <td style="font-weight:bold; color:#2b6cb0;">{{ item.item }}</td>
-                            <td style="text-align:center;">{{ item.qtyord|int }}</td>
-                            <td style="text-align:center;" class="picked-cell">0</td> 
+                            <td style="text-align:center;">{{ item.remaining|int }}</td>
+                            <td style="text-align:center;" class="picked-cell" data-line="{{ item.tranlineno }}">0</td> 
                         </tr>
                         {% else %}
                         <tr>
@@ -161,37 +180,127 @@
                     No items in session yet.
                 </div>
             </div>
-            <div class="modal-footer"><button onclick="closeModal('reviewModal')" class="btn-cancel">Back</button></div>
+            <div class="modal-footer">
+                <button onclick="clearSession()" class="btn-cancel" style="color:red; float:left;">Clear All</button>
+                <button onclick="closeModal('reviewModal')" class="btn-cancel">Back</button>
+            </div>
         </div>
     </div>
 
     <script>
+        // --- GLOBAL STATE ---
         let selectedItemCode = null;
+        let selectedLineNo = null; 
         let currentBinMaxQty = 999999;
         let currentOrderMaxQty = 999999; 
         let isAutoMode = true;
         let currentBin = ""; 
         let sessionPicks = [];
 
-        function updateMode() {
-            const mode = document.querySelector('input[name="pickMode"]:checked').value;
-            isAutoMode = (mode === 'auto');
-            document.getElementById('qtyInput').readOnly = isAutoMode;
-            if(!isAutoMode) {
-                document.getElementById('qtyInput').focus();
-                document.getElementById('qtyInput').select();
+        const SO_NUMBER = "{{ so }}";
+
+        // --- LIFECYCLE: LOAD SAVED DATA ---
+        window.onload = function() {
+            if(SO_NUMBER) {
+                loadFromLocal();
+                updateSessionDisplay();
+                updateMode();
+            }
+            if(document.getElementById('soInput')) {
+                document.getElementById('soInput').focus();
+            }
+        };
+
+        // --- LOCAL STORAGE (CRASH PROTECTION) ---
+        function saveToLocal() {
+            if(!SO_NUMBER) return;
+            const key = `twg_picks_${SO_NUMBER}`;
+            localStorage.setItem(key, JSON.stringify(sessionPicks));
+        }
+
+        function loadFromLocal() {
+            if(!SO_NUMBER) return;
+            const key = `twg_picks_${SO_NUMBER}`;
+            const saved = localStorage.getItem(key);
+            if(saved) {
+                try {
+                    sessionPicks = JSON.parse(saved);
+                } catch(e) { console.error("Save file corrupt"); }
             }
         }
 
-        function selectRow(row, itemCode, remainingQty) {
+        function clearLocal() {
+            if(!SO_NUMBER) return;
+            localStorage.removeItem(`twg_picks_${SO_NUMBER}`);
+            sessionPicks = [];
+            updateSessionDisplay();
+        }
+
+        // --- UI LOGIC ---
+
+        function updateMode() {
+            const modeEl = document.querySelector('input[name="pickMode"]:checked');
+            if(!modeEl) return;
+            const mode = modeEl.value;
+            isAutoMode = (mode === 'auto');
+            
+            const qtyInput = document.getElementById('qtyInput');
+            const btnMinus = document.getElementById('btnMinus');
+            const btnPlus = document.getElementById('btnPlus');
+            const addBtnContainer = document.getElementById('addBtnContainer');
+
+            if (isAutoMode) {
+                // AUTO MODE: Clean "Scoreboard" look
+                qtyInput.readOnly = true;
+                qtyInput.classList.add('qty-input-auto');
+                qtyInput.classList.remove('qty-input-manual');
+                
+                // Hide Buttons
+                btnMinus.classList.add('d-none');
+                btnPlus.classList.add('d-none');
+                addBtnContainer.classList.add('d-none'); 
+                
+                if(currentBin) document.getElementById('itemInput').focus();
+
+            } else {
+                // MANUAL MODE: Controls visible
+                qtyInput.readOnly = false;
+                qtyInput.classList.add('qty-input-manual');
+                qtyInput.classList.remove('qty-input-auto');
+                
+                // Show Buttons
+                btnMinus.classList.remove('d-none');
+                btnPlus.classList.remove('d-none');
+                addBtnContainer.classList.remove('d-none'); 
+                
+                qtyInput.focus();
+                qtyInput.select();
+            }
+        }
+
+        function adjustQty(amount) {
+            if(isAutoMode) return; 
+            
+            const input = document.getElementById('qtyInput');
+            let val = parseFloat(input.value) || 0;
+            val += amount;
+            
+            if(val < 0) val = 0;
+            
+            input.value = val;
+            input.focus();
+        }
+
+        function selectRow(row, itemCode, remainingQty, lineNo) {
             const rows = document.querySelectorAll('.item-row');
             rows.forEach(r => r.classList.remove('active-row'));
             row.classList.add('active-row');
             
             selectedItemCode = itemCode;
+            selectedLineNo = lineNo; 
             currentOrderMaxQty = remainingQty; 
-            document.getElementById('binButtonArea').style.display = 'block';
             
+            document.getElementById('binButtonArea').style.display = 'block';
             document.getElementById('binInput').value = '';
             document.getElementById('itemInput').value = '';
             
@@ -202,28 +311,23 @@
         }
 
         function updateSessionDisplay() {
-            if(!selectedItemCode) return;
-            
-            // 1. Update Grid Cell for selected item
-            const itemTotal = sessionPicks
-                .filter(p => p.item === selectedItemCode)
-                .reduce((sum, p) => sum + p.qty, 0);
-            
-            const activeRow = document.querySelector('.active-row .picked-cell');
-            if(activeRow) activeRow.innerText = itemTotal;
+            document.getElementById('scanCount').innerText = sessionPicks.length;
+            document.querySelectorAll('.picked-cell').forEach(cell => cell.innerText = "0");
 
-            // 2. Update Grid Cells for ALL items (in case we deleted something)
-            // Ideally we iterate rows, but simplistic approach:
             sessionPicks.forEach(p => {
-                // Find row by ID or content? Row IDs were added in template
+                const cell = document.querySelector(`.picked-cell[data-line="${p.lineNo}"]`);
+                if(cell) {
+                    let current = parseFloat(cell.innerText) || 0;
+                    cell.innerText = current + p.qty;
+                }
             });
 
-            // 3. Update Global Counter Button
-            const totalCount = sessionPicks.length;
-            document.getElementById('scanCount').innerText = totalCount;
-            
-            // 4. Update Qty Input (Session Qty)
-            document.getElementById('qtyInput').value = itemTotal;
+            if(selectedLineNo) {
+                const itemTotal = sessionPicks
+                    .filter(p => p.lineNo === selectedLineNo)
+                    .reduce((sum, p) => sum + p.qty, 0);
+                document.getElementById('qtyInput').value = itemTotal;
+            }
         }
 
         function validateBin() {
@@ -246,11 +350,12 @@
                     document.getElementById('binInput').value = '';
                     document.getElementById('binInput').focus();
                 }
-            });
+            })
+            .catch(err => alert("Network Error: " + err));
         }
 
         function addToSession() {
-            if(!selectedItemCode) { alert("Select item first!"); return; }
+            if(!selectedItemCode) { alert("Select item row first!"); return; }
             
             const inputBin = document.getElementById('binInput').value.trim();
             if(inputBin !== currentBin) {
@@ -266,7 +371,7 @@
                 if(qtyToAdd <= 0) return;
             }
 
-            // CHECKS
+            // --- CHECKS ---
             const picksInBin = sessionPicks
                 .filter(p => p.item === selectedItemCode && p.bin === currentBin)
                 .reduce((sum, p) => sum + p.qty, 0);
@@ -276,27 +381,30 @@
                 return;
             }
 
-            const totalPicked = sessionPicks
-                .filter(p => p.item === selectedItemCode)
+            const totalPickedForLine = sessionPicks
+                .filter(p => p.lineNo === selectedLineNo)
                 .reduce((sum, p) => sum + p.qty, 0);
             
-            if(totalPicked + qtyToAdd > currentOrderMaxQty) {
-                alert(`⛔ ORDER LIMIT!\nOrder needs ${currentOrderMaxQty}.\nYou have ${totalPicked}.`);
+            if(totalPickedForLine + qtyToAdd > currentOrderMaxQty) {
+                alert(`⛔ ORDER LIMIT!\nLine needs ${currentOrderMaxQty}.\nYou have ${totalPickedForLine}.`);
                 return;
             }
 
-            // Add
+            // ADD TO STATE
             sessionPicks.push({
                 id: Date.now(),
+                lineNo: selectedLineNo,
                 item: selectedItemCode,
                 bin: currentBin,
                 qty: qtyToAdd
             });
 
-            // Feedback
+            saveToLocal();
+
+            // Feedback Animation
             const qtyBox = document.getElementById('qtyInput');
             qtyBox.classList.remove('flash-active');
-            void qtyBox.offsetWidth;
+            void qtyBox.offsetWidth; 
             qtyBox.classList.add('flash-active');
 
             updateSessionDisplay();
@@ -327,14 +435,15 @@
             if(!confirm(`Submit ${sessionPicks.length} pick records?`)) return;
 
             const btn = document.querySelector('.btn-action[onclick="submitFinal()"]');
-            btn.innerText = "Sending...";
+            const originalText = btn.innerHTML;
+            btn.innerHTML = "<i class='fas fa-spinner fa-spin'></i> Sending...";
             btn.disabled = true;
 
             fetch('/process_batch_scan', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
-                    so: "{{ so }}",
+                    so: SO_NUMBER,
                     picks: sessionPicks
                 })
             })
@@ -342,12 +451,18 @@
             .then(data => {
                 if(data.status === 'success') {
                     alert(data.msg);
+                    clearLocal();
                     location.reload(); 
                 } else {
                     alert("❌ Error: " + data.msg);
-                    btn.innerText = "Submit Order";
+                    btn.innerHTML = originalText;
                     btn.disabled = false;
                 }
+            })
+            .catch(err => {
+                alert("Network/Server Error: " + err);
+                btn.innerHTML = originalText;
+                btn.disabled = false;
             });
         }
 
@@ -359,7 +474,10 @@
                 document.getElementById('emptyReview').style.display = 'block';
             } else {
                 document.getElementById('emptyReview').style.display = 'none';
-                sessionPicks.forEach((p, index) => {
+                const revPicks = [...sessionPicks].reverse(); 
+                
+                revPicks.forEach((p) => {
+                    const realIndex = sessionPicks.indexOf(p);
                     const row = document.createElement('tr');
                     row.style.borderBottom = "1px solid #eee";
                     row.innerHTML = `
@@ -367,7 +485,7 @@
                         <td style="text-align:center; color:#4a5568;">${p.bin}</td>
                         <td style="text-align:center; font-weight:bold; color:#2b6cb0;">${p.qty}</td>
                         <td style="text-align:center;">
-                            <button class="btn-sm btn-danger" onclick="removePick(${index})">
+                            <button class="btn-sm btn-danger" onclick="removePick(${realIndex})">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </td>
@@ -381,8 +499,16 @@
         function removePick(index) {
             if(confirm("Remove this pick?")) {
                 sessionPicks.splice(index, 1);
-                openReviewModal(); 
+                saveToLocal();
+                openReviewModal();
                 updateSessionDisplay();
+            }
+        }
+        
+        function clearSession() {
+            if(confirm("Are you sure you want to delete ALL scans?")) {
+                clearLocal();
+                closeModal('reviewModal');
             }
         }
 
@@ -391,7 +517,7 @@
             const modal = document.getElementById('binModal');
             const list = document.getElementById('binList');
             modal.style.display = 'flex';
-            list.innerHTML = 'Loading...';
+            list.innerHTML = '<p>Loading...</p>';
 
             fetch('/get_item_bins', {
                 method: 'POST',
@@ -401,7 +527,7 @@
             .then(response => response.json())
             .then(data => {
                 list.innerHTML = '';
-                if(data.bins.length === 0) list.innerHTML = '<div style="color:red;">No Stock!</div>';
+                if(!data.bins || data.bins.length === 0) list.innerHTML = '<div style="color:red; padding:20px;">No Stock Found!</div>';
                 else {
                     data.bins.forEach(bin => {
                         const row = document.createElement('div');
@@ -411,10 +537,15 @@
                         list.appendChild(row);
                     });
                 }
+            })
+            .catch(err => {
+                list.innerHTML = '<div style="color:red; padding:20px;">Connection Failed</div>';
             });
         }
+        
         function closeModal(id) { document.getElementById(id).style.display = 'none'; }
 
+        // --- EVENT LISTENERS ---
         const binInput = document.getElementById('binInput');
         const itemInput = document.getElementById('itemInput');
         const qtyInput = document.getElementById('qtyInput');
@@ -422,8 +553,12 @@
         if(binInput) binInput.addEventListener('keypress', e => { if(e.key==='Enter') { e.preventDefault(); validateBin(); } });
         if(itemInput) itemInput.addEventListener('keypress', e => { if(e.key==='Enter') { e.preventDefault(); handleItemScan(); } });
         if(qtyInput) qtyInput.addEventListener('keypress', e => { if(e.key==='Enter') { e.preventDefault(); addToSession(); } });
-
-        updateMode();
+        
+        // Prevent accidental back navigation
+        history.pushState(null, null, location.href);
+        window.onpopstate = function () {
+            history.go(1);
+        };
     </script>
 </body>
 </html>

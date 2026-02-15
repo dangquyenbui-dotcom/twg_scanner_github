@@ -1,7 +1,11 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 from config import Config
 import pyodbc
-import json
+import logging
+import datetime
+
+# Configure Logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -15,6 +19,7 @@ DB_COLS = {
 }
 
 def get_db_connection():
+    """Establishes a connection to the SQL Server."""
     conn_str = (
         f"DRIVER={app.config['DB_DRIVER']};"
         f"SERVER={app.config['DB_SERVER']};"
@@ -23,9 +28,9 @@ def get_db_connection():
         f"PWD={app.config['DB_PWD']};"
     )
     try:
-        return pyodbc.connect(conn_str, timeout=5)
+        return pyodbc.connect(conn_str, timeout=10, autocommit=False) # autocommit=False for Transactions
     except Exception as e:
-        print(f"❌ DB Connection Error: {e}")
+        logging.error(f"DB Connection Failed: {e}")
         return None
 
 def row_to_dict(cursor, row):
@@ -33,12 +38,16 @@ def row_to_dict(cursor, row):
     return dict(zip(columns, row))
 
 def detect_columns():
+    """Dynamically detects column names to handle schema variations."""
     if DB_COLS['ScanOnhand2']: return 
+    
     conn = get_db_connection()
     if not conn: return
+    
     try:
         cursor = conn.cursor()
-        # 1. ScanOnhand2
+        
+        # 1. Detect Location Column in Inventory
         try:
             cursor.execute(f"SELECT TOP 1 * FROM {Config.DB_AUTH}.dbo.ScanOnhand2")
             cols = [c[0].lower() for c in cursor.description]
@@ -47,31 +56,35 @@ def detect_columns():
             elif 'location_id' in cols: DB_COLS['ScanOnhand2'] = 'location_id'
             else: DB_COLS['ScanOnhand2'] = 'terr'
         except: DB_COLS['ScanOnhand2'] = 'terr'
-        # 2. ScanUsers
+
+        # 2. Detect Location Column in Users
         try:
             cursor.execute(f"SELECT TOP 1 * FROM {Config.DB_AUTH}.dbo.ScanUsers")
             cols = [c[0].lower() for c in cursor.description]
             if 'location_id' in cols: DB_COLS['ScanUsers'] = 'location_id'
-            elif 'location' in cols: DB_COLS['ScanUsers'] = 'location'
             else: DB_COLS['ScanUsers'] = 'location'
         except: DB_COLS['ScanUsers'] = 'location'
-        # 3. UPC Checks
+
+        # 3. Check for UPC Column Support
         try:
             cursor.execute(f"SELECT TOP 1 * FROM {Config.DB_AUTH}.dbo.ScanBinTran2")
             cols = [c[0].lower() for c in cursor.description]
             DB_COLS['ScanBinTran2_UPC'] = ('upc' in cols)
         except: DB_COLS['ScanBinTran2_UPC'] = False
+
         try:
             cursor.execute(f"SELECT TOP 1 * FROM {Config.DB_AUTH}.dbo.ScanItem")
             cols = [c[0].lower() for c in cursor.description]
             DB_COLS['ScanItem_UPC'] = ('upc' in cols)
         except: DB_COLS['ScanItem_UPC'] = False
+
     except Exception as e:
-        print(f"⚠️ Column Detection Error: {e}")
+        logging.error(f"Column Detection Error: {e}")
     finally:
         conn.close()
 
 # --- ROUTES ---
+
 @app.route('/')
 def index():
     if 'user_id' not in session: return redirect(url_for('login'))
@@ -83,37 +96,44 @@ def login():
     if request.method == 'POST':
         user_id_input = request.form['userid'].strip().upper()
         password_input = request.form['password']
+        
         conn = get_db_connection()
         if not conn:
-            flash("❌ Connection to Database Failed!", "error")
+            flash("❌ Database Offline.", "error")
             return render_template('login.html')
+            
         try:
             cursor = conn.cursor()
             sql = f"SELECT * FROM {Config.DB_AUTH}.dbo.ScanUsers WHERE userid=? AND pw=?"
             cursor.execute(sql, (user_id_input, password_input))
             row = cursor.fetchone()
+            
             if row:
                 user = row_to_dict(cursor, row)
                 session['user_id'] = user.get('userid', '').strip()
                 session['user_name'] = user.get('name', 'Unknown')
+                
+                # Determine Location
                 loc_col = DB_COLS['ScanUsers'] or 'location'
                 raw_loc = user.get(loc_col)
-                if raw_loc and str(raw_loc).strip():
-                    session['location'] = str(raw_loc).strip()
-                else: 
-                    session['location'] = 'Unknown'
+                session['location'] = str(raw_loc).strip() if raw_loc else 'Unknown'
+                
+                # Set User Online Status
                 try:
                     update_sql = f"UPDATE {Config.DB_AUTH}.dbo.ScanUsers SET userstat=1 WHERE userid=?"
                     cursor.execute(update_sql, (user_id_input,))
                     conn.commit()
-                except: pass
+                except Exception as ex:
+                    logging.warning(f"Failed to update userstat: {ex}")
+                    
                 return redirect(url_for('dashboard')) 
             else:
                 flash("Invalid User ID or Password.", "error")
         except Exception as e:
-            flash(f"Login Error: {str(e)}", "error")
+            flash(f"Login System Error: {str(e)}", "error")
         finally:
             conn.close()
+            
     return render_template('login.html')
 
 @app.route('/dashboard')
@@ -124,64 +144,90 @@ def dashboard():
 @app.route('/picking', methods=['GET'])
 def picking_menu():
     if 'user_id' not in session: return redirect(url_for('login'))
+    
     raw_so = request.args.get('so', '')
     order_items = []
     resolved_so = raw_so 
+    
     if raw_so:
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
+            
+            # 1. Validate Order Exists
             search_term = f"%{raw_so.strip()}"
             check_sql = f"SELECT TOP 1 sono FROM {Config.DB_ORDERS}.dbo.SOTRAN WHERE sono LIKE ?"
             cursor.execute(check_sql, (search_term,))
             check_row = cursor.fetchone()
+            
             if not check_row:
                 flash(f"❌ Order '{raw_so}' not found.", "error")
                 return render_template('picking.html', so=None, items=[])
+            
             resolved_so = check_row[0] 
             user_loc = session.get('location', 'Unknown').strip()
+            
+            # 2. Fetch Open Lines
+            # We explicitly fetch tranlineno to handle split lines correctly
             base_sql = f"""
                 SELECT tranlineno, item, qtyord, shipqty, (qtyord - shipqty) as remaining, loctid 
-                FROM {Config.DB_ORDERS}.dbo.SOTRAN WHERE sono=? AND qtyord > shipqty
+                FROM {Config.DB_ORDERS}.dbo.SOTRAN 
+                WHERE sono=? AND qtyord > shipqty
             """
             params = [resolved_so]
+            
+            # Location Fencing: If User is ATL, only show ATL lines. 
+            # '000' is usually Admin/Headquarters
             if user_loc != '000' and user_loc != 'Unknown':
                 base_sql += " AND loctid LIKE ?"
                 params.append(f"{user_loc}%")
-            base_sql += " ORDER BY tranlineno ASC"
+                
+            base_sql += " ORDER BY item ASC, tranlineno ASC"
+            
             cursor.execute(base_sql, tuple(params))
             rows = cursor.fetchall()
             order_items = [row_to_dict(cursor, row) for row in rows]
+            
             if not order_items:
-                flash(f"✅ No open lines for {user_loc} on Order #{resolved_so.strip()}", "success")
+                flash(f"✅ Order #{resolved_so.strip()} is fully picked for your location!", "success")
+                
         except Exception as e:
             flash(f"Database Error: {str(e)}", "error")
         finally:
             conn.close()
+            
     return render_template('picking.html', so=resolved_so, items=order_items)
 
 @app.route('/get_item_bins', methods=['POST'])
 def get_item_bins():
     if 'user_id' not in session: return jsonify({'status':'error', 'msg':'Login required'})
     detect_columns()
+    
     data = request.json
     item_code = data.get('item', '').strip()
     user_loc = session.get('location', 'Unknown').strip()
+    
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
         loc_col = DB_COLS['ScanOnhand2'] or 'terr'
+        
+        # Find bins with stock
         sql = f"""
             SELECT bin, onhand, {loc_col} FROM {Config.DB_AUTH}.dbo.ScanOnhand2 
             WHERE item LIKE ? AND onhand > 0
         """
         params = [f"%{item_code}%"]
+        
         if user_loc != '000' and user_loc != 'Unknown':
             sql += f" AND {loc_col} LIKE ?"
             params.append(f"{user_loc}%")
+            
         sql += " ORDER BY onhand DESC"
+        
         cursor.execute(sql, tuple(params))
         rows = cursor.fetchall()
+        
         bins = []
         for row in rows:
             r = row_to_dict(cursor, row)
@@ -190,6 +236,7 @@ def get_item_bins():
                 'qty': int(r['onhand']),
                 'loc': r.get(loc_col, '').strip()
             })
+            
         return jsonify({'status': 'success', 'bins': bins})
     except Exception as e:
         return jsonify({'status': 'error', 'msg': str(e)})
@@ -200,10 +247,12 @@ def get_item_bins():
 def validate_bin():
     if 'user_id' not in session: return jsonify({'status':'error', 'msg':'Login required'})
     detect_columns()
+    
     data = request.json
     bin_loc = data.get('bin', '').strip()
     item_code = data.get('item', '').strip()
     user_loc = session.get('location', 'Unknown').strip()
+    
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
@@ -214,92 +263,124 @@ def validate_bin():
             WHERE bin=? AND item LIKE ? AND onhand > 0
         """
         params = [bin_loc, f"%{item_code}%"]
+        
         if user_loc != '000' and user_loc != 'Unknown':
             sql += f" AND {loc_col} LIKE ?"
             params.append(f"{user_loc}%")
+            
         cursor.execute(sql, tuple(params))
         row = cursor.fetchone()
         
         if row:
             return jsonify({'status': 'success', 'onhand': int(row[0])})
         else:
-            return jsonify({'status': 'error', 'msg': f"❌ Bin '{bin_loc}' does not contain '{item_code}'"})
+            return jsonify({'status': 'error', 'msg': f"❌ Bin '{bin_loc}' does not contain '{item_code}' or is empty."})
     except Exception as e:
         return jsonify({'status': 'error', 'msg': str(e)})
     finally:
         conn.close()
 
-# --- NEW: BATCH PROCESS ROUTE ---
 @app.route('/process_batch_scan', methods=['POST'])
 def process_batch_scan():
+    """
+    CRITICAL: This function processes the batch.
+    It uses DB Transactions to ensure partial failures do not corrupt data.
+    """
     if 'user_id' not in session: return jsonify({'status':'error', 'msg':'Session expired'})
     detect_columns()
     
     data = request.json
     picks = data.get('picks', [])
     so_num = data.get('so', '')
-    user_loc = session.get('location', 'Unknown').strip()
+    user_id = session.get('user_id')
     
     if not picks:
         return jsonify({'status': 'error', 'msg': 'No picks to submit!'})
 
     conn = get_db_connection()
+    if not conn:
+        return jsonify({'status': 'error', 'msg': 'Database Unavailable'})
+
     try:
         cursor = conn.cursor()
         
-        # Validate and Process Each Pick
+        # --- START TRANSACTION ---
+        
         processed_count = 0
         
         for pick in picks:
-            scanned_input = pick.get('item', '').strip()
+            scanned_item = pick.get('item', '').strip()
             bin_loc = pick.get('bin', '').strip()
             qty = float(pick.get('qty', 0))
-            
-            # 1. READ & VALIDATE (Order Data)
-            sql_check = f"SELECT qtyord, shipqty, tranlineno FROM {Config.DB_ORDERS}.dbo.SOTRAN WHERE sono=? AND item=?"
-            params = [so_num, scanned_input]
-            if user_loc != '000' and user_loc != 'Unknown':
-                sql_check += " AND loctid LIKE ?"
-                params.append(f"{user_loc}%")
-            cursor.execute(sql_check, tuple(params))
+            tran_line = pick.get('lineNo') # IMPORTANT: We now pass the specific line number
+
+            if qty <= 0: continue
+
+            # 1. SERVER-SIDE VALIDATION: Check Order Line Status AGAIN
+            sql_check_so = f"""
+                SELECT (qtyord - shipqty) as remaining 
+                FROM {Config.DB_ORDERS}.dbo.SOTRAN 
+                WHERE sono=? AND tranlineno=?
+            """
+            cursor.execute(sql_check_so, (so_num, tran_line))
             so_row = cursor.fetchone()
             
             if not so_row:
-                raise Exception(f"Item {scanned_input} invalid on Order")
+                 raise Exception(f"Order Line {tran_line} for {scanned_item} no longer exists or was closed.")
             
-            line_data = row_to_dict(cursor, so_row)
-            tran_line = line_data.get('tranlineno')
+            remaining_so = float(so_row[0])
+            if qty > remaining_so:
+                raise Exception(f"Over-shipment detected for {scanned_item}. Needed {remaining_so}, tried to pick {qty}.")
 
-            # 2. Check Bin Qty Limit
-            bin_check_sql = f"SELECT TOP 1 onhand FROM {Config.DB_AUTH}.dbo.ScanOnhand2 WHERE item LIKE ? AND bin=? AND onhand > 0"
-            cursor.execute(bin_check_sql, (f"%{scanned_input}%", bin_loc))
-            bin_row = cursor.fetchone()
-            if not bin_row:
-                 raise Exception(f"Bin '{bin_loc}' Invalid for item {scanned_input}")
-            
-            max_onhand = float(bin_row[0])
-            if qty > max_onhand:
-                 raise Exception(f"Overpick in Bin {bin_loc}! Has {int(max_onhand)}, tried {int(qty)}")
+            # 2. SERVER-SIDE VALIDATION & UPDATE
+            if not Config.SIMULATION_MODE:
+                # A. Decrement Inventory (Optimistic Locking)
+                update_inv_sql = f"""
+                    UPDATE {Config.DB_AUTH}.dbo.ScanOnhand2 
+                    SET onhand = onhand - ? 
+                    WHERE bin=? AND item=? AND onhand >= ?
+                """
+                cursor.execute(update_inv_sql, (qty, bin_loc, scanned_item, qty))
+                
+                if cursor.rowcount == 0:
+                     raise Exception(f"Inventory Conflict! Not enough stock in {bin_loc} for {scanned_item}.")
 
-            # 3. Get UPC
-            upc_code = None
-            if DB_COLS['ScanItem_UPC']:
-                cursor.execute(f"SELECT TOP 1 upc FROM {Config.DB_AUTH}.dbo.ScanItem WHERE item LIKE ?", (f"%{scanned_input}%",))
-                upc_row = cursor.fetchone()
-                if upc_row and upc_row[0]: upc_code = upc_row[0].strip()
+                # B. Update Sales Order (Ship Qty)
+                update_so_sql = f"""
+                    UPDATE {Config.DB_ORDERS}.dbo.SOTRAN
+                    SET shipqty = shipqty + ?
+                    WHERE sono=? AND tranlineno=?
+                """
+                cursor.execute(update_so_sql, (qty, so_num, tran_line))
 
-            # 4. SIMULATED INSERT
-            # In a real scenario, we would execute INSERTs here.
+                # C. Audit Log
+                upc_code = '' 
+                if DB_COLS['ScanItem_UPC']:
+                    cursor.execute(f"SELECT TOP 1 upc FROM {Config.DB_AUTH}.dbo.ScanItem WHERE item=?", (scanned_item,))
+                    u_row = cursor.fetchone()
+                    if u_row: upc_code = u_row[0]
+
+                insert_hist_sql = f"""
+                    INSERT INTO {Config.DB_AUTH}.dbo.ScanBinTran2 
+                    (item, bin, qty, userid, datetime, sono, type, upc)
+                    VALUES (?, ?, ?, ?, GETDATE(), ?, 'PICK', ?)
+                """
+                cursor.execute(insert_hist_sql, (scanned_item, bin_loc, qty, user_id, so_num, upc_code))
+
             processed_count += 1
 
-        # Success for Batch
-        return jsonify({
-            'status': 'success', 
-            'msg': f'SIMULATION: Successfully saved {processed_count} pick records!'
-        })
+        # --- COMMIT TRANSACTION ---
+        conn.commit()
+        
+        status_msg = f"Successfully saved {processed_count} lines."
+        if Config.SIMULATION_MODE:
+             status_msg = f"SIMULATION: {processed_count} lines passed validation (No DB changes)."
+
+        return jsonify({'status': 'success', 'msg': status_msg})
 
     except Exception as e:
-        conn.rollback()
+        conn.rollback() # CRITICAL: Undo everything if even one line fails
+        logging.error(f"Batch Transaction Failed: {e}")
         return jsonify({'status': 'error', 'msg': f"Batch Failed: {str(e)}"})
     finally:
         conn.close()
