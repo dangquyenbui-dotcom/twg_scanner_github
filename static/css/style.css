@@ -113,6 +113,17 @@ input.scan-input:focus {
     box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.2);
 }
 
+/* Hide Spinner on Number Inputs (Chrome/Safari/Edge) */
+input[type=number]::-webkit-inner-spin-button, 
+input[type=number]::-webkit-outer-spin-button { 
+  -webkit-appearance: none; 
+  margin: 0; 
+}
+/* Firefox */
+input[type=number] {
+  -moz-appearance: textfield;
+}
+
 /* --- PICK MODE SELECTOR (COMPACT) --- */
 .mode-selector {
     display: flex;
@@ -139,19 +150,18 @@ input.scan-input:focus {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 10px; /* Reduced padding (was 15px) */
+    padding: 10px; 
     background: #ffffff;
     border: 2px solid #cbd5e0;
     border-radius: 8px;
     color: #718096;
     font-weight: bold;
-    font-size: 14px; /* Smaller font (was 16px) */
+    font-size: 14px;
     transition: all 0.2s ease;
-    /* Removed height: 100% to let content dictate size */
 }
 
 .mode-option i {
-    font-size: 18px; /* Smaller icon (was 24px) */
+    font-size: 18px;
     margin-bottom: 3px;
 }
 

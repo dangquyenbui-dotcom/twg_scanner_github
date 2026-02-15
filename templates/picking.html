@@ -38,7 +38,7 @@
                 </div>
                 <h3 style="color: #4a5568;">Scan Sales Order</h3>
                 <form method="GET" action="/picking" style="margin-top: 20px;">
-                    <input type="text" name="so" class="scan-input" id="soInput" placeholder="Scan SO Barcode..." autofocus autocomplete="off">
+                    <input type="text" name="so" class="scan-input" id="soInput" placeholder="Scan SO (Touch to Type)..." autofocus autocomplete="off" inputmode="none">
                 </form>
             </div>
             
@@ -72,11 +72,11 @@
 
                 <div class="form-group">
                     <label>Bin Location</label>
-                    <input type="text" id="binInput" class="scan-input" placeholder="Scan BIN..." autocomplete="off">
+                    <input type="text" id="binInput" class="scan-input" placeholder="Scan BIN..." autocomplete="off" inputmode="none">
                 </div>
                 <div class="form-group">
                     <label>Item / UPC</label>
-                    <input type="text" id="itemInput" class="scan-input" placeholder="Scan ITEM..." autocomplete="off">
+                    <input type="text" id="itemInput" class="scan-input" placeholder="Scan ITEM..." autocomplete="off" inputmode="none">
                 </div>
                 
                 <div class="qty-area">
@@ -90,7 +90,7 @@
                                 <i class="fas fa-minus"></i>
                             </button>
 
-                            <input type="number" id="qtyInput" class="scan-input qty-input-manual" value="0">
+                            <input type="number" id="qtyInput" class="scan-input qty-input-manual" value="0" inputmode="decimal">
 
                             <button class="btn-qty-adjust" id="btnPlus" onclick="adjustQty(1)">
                                 <i class="fas fa-plus"></i>
@@ -206,7 +206,7 @@
         const SO_NUMBER = "{{ so }}";
         
         let sessionPicks = [];
-        let binCache = {}; // Cache: { 'ITEM001': [{bin:'A1', qty:10}, ...] }
+        let binCache = {}; 
         let selectedItemCode = null;
         let selectedLineNo = null; 
         
@@ -216,6 +216,23 @@
         
         let isAutoMode = true;
         let isSubmitting = false;
+
+        // --- SMART INPUT LOGIC FOR SO SCAN (FIXED) ---
+        // This ensures scanner works by default, but touching calls the keyboard.
+        document.addEventListener('DOMContentLoaded', () => {
+            const soInput = document.getElementById('soInput');
+            if(soInput) {
+                soInput.addEventListener('click', function() {
+                    // If user touches the field, they want to type!
+                    if (this.inputMode === 'none') {
+                        this.inputMode = 'decimal'; // Switch to Numpad
+                        // Cycle focus to trigger keyboard
+                        this.blur();
+                        setTimeout(() => this.focus(), 50); 
+                    }
+                });
+            }
+        });
 
         // --- AUDIO SYSTEM ---
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -256,10 +273,8 @@
             }
         }
 
-        // Listen for Browser Events
         window.addEventListener('online', () => updateStatusUI(true));
         window.addEventListener('offline', () => updateStatusUI(false));
-        // Check on load
         updateStatusUI(navigator.onLine);
 
         // --- CACHING & DATA LOADING ---
@@ -281,7 +296,6 @@
             }
             localStorage.setItem(`twg_picks_${SO_NUMBER}`, JSON.stringify(sessionPicks));
             
-            // Show pending count in status bar
             const pendingEl = document.getElementById('pendingCount');
             if(sessionPicks.length > 0) {
                 pendingEl.style.display = 'inline-block';
@@ -306,21 +320,18 @@
             localStorage.removeItem(`twg_batch_id_${SO_NUMBER}`);
             sessionPicks = [];
             updateSessionDisplay();
-            saveToLocal(); // Clear the pending count UI
+            saveToLocal(); 
         }
 
-        // --- BIN PRE-FETCHING (THE HICCUP FIX) ---
+        // --- BIN PRE-FETCHING ---
         async function prefetchBins(item) {
-            // If we already have it in cache, do nothing
             if (binCache[item]) return;
-
-            // Update UI to show we are "thinking" (optional, mainly for debugging)
             const btn = document.getElementById('btnViewBins');
             if(btn) btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Loading...';
 
             if (!navigator.onLine) {
                 if(btn) btn.innerHTML = '<i class="fas fa-search"></i> View Bins';
-                return; // Can't fetch if offline
+                return; 
             }
 
             try {
@@ -332,13 +343,12 @@
                 const data = await response.json();
                 
                 if (data.status === 'success') {
-                    binCache[item] = data.bins; // Store in RAM
+                    binCache[item] = data.bins; 
                     console.log(`Cached ${data.bins.length} bins for ${item}`);
                 }
             } catch (err) {
                 console.warn("Background fetch failed:", err);
             } finally {
-                // Restore button text
                 if(btn) btn.innerHTML = '<i class="fas fa-search"></i> View Bins';
             }
         }
@@ -354,6 +364,9 @@
             const btnMinus = document.getElementById('btnMinus');
             const btnPlus = document.getElementById('btnPlus');
             const addBtnContainer = document.getElementById('addBtnContainer');
+            
+            const binIn = document.getElementById('binInput');
+            const itemIn = document.getElementById('itemInput');
 
             if (isAutoMode) {
                 qtyInput.readOnly = true;
@@ -362,6 +375,11 @@
                 btnMinus.classList.add('d-none');
                 btnPlus.classList.add('d-none');
                 addBtnContainer.classList.add('d-none'); 
+                
+                // AUTO Mode: Hide keyboard for scanning
+                if(binIn) binIn.inputMode = 'none';
+                if(itemIn) itemIn.inputMode = 'none';
+
                 if(currentBin) document.getElementById('itemInput').focus();
             } else {
                 qtyInput.readOnly = false;
@@ -370,6 +388,11 @@
                 btnMinus.classList.remove('d-none');
                 btnPlus.classList.remove('d-none');
                 addBtnContainer.classList.remove('d-none'); 
+                
+                // MANUAL Mode: Allow keyboard (in case scanner is broken)
+                if(binIn) binIn.inputMode = 'text';
+                if(itemIn) itemIn.inputMode = 'text';
+
                 qtyInput.focus();
                 qtyInput.select();
             }
@@ -394,16 +417,16 @@
             
             document.getElementById('binButtonArea').style.display = 'block';
             
-            // RESET INPUTS
             document.getElementById('binInput').value = '';
             document.getElementById('itemInput').value = '';
             
             updateSessionDisplay();
             
             currentBinMaxQty = 999999; 
-            document.getElementById('binInput').focus();
+            
+            // NOTE: We do NOT focus binInput here, preventing keyboard popup.
+            // User must explicitly tap "Bin Location" or scan to start.
 
-            // *** TRIGGER BACKGROUND CACHE ***
             prefetchBins(itemCode);
         }
 
@@ -449,7 +472,6 @@
             const binVal = document.getElementById('binInput').value.trim();
             if(!binVal || !selectedItemCode) return;
 
-            // 1. Check Cache First (Instant Offline Check)
             if (binCache[selectedItemCode]) {
                 const foundBin = binCache[selectedItemCode].find(b => b.bin === binVal);
                 if (foundBin) {
@@ -459,14 +481,10 @@
                     document.getElementById('itemInput').focus();
                     return;
                 }
-                // If in cache but not found, it might be a new bin not in cache, so we continue to server check
             }
 
-            // 2. Server Check (if Online)
             if (!navigator.onLine) {
-                 // Offline and not in cache?
                  showToast("Offline: Cannot verify new bin.", 'warning');
-                 // Allow optimistic override? For now, let's block to be safe.
                  return;
             }
 
@@ -502,7 +520,6 @@
             let qtyToAdd = isAutoMode ? 1 : (parseFloat(document.getElementById('qtyInput').value) || 0);
             if(qtyToAdd <= 0) return;
 
-            // Checks
             const picksInBin = sessionPicks
                 .filter(p => p.item === selectedItemCode && p.bin === currentBin)
                 .reduce((sum, p) => sum + p.qty, 0);
@@ -521,7 +538,6 @@
                 return;
             }
 
-            // ADD
             sessionPicks.push({
                 id: Date.now(),
                 lineNo: selectedLineNo,
@@ -532,7 +548,6 @@
 
             saveToLocal();
             
-            // Animation
             const qtyBox = document.getElementById('qtyInput');
             qtyBox.classList.remove('flash-active');
             void qtyBox.offsetWidth; 
@@ -562,8 +577,6 @@
                 document.getElementById('qtyInput').select();
             }
         }
-
-        // --- SUBMISSION ---
 
         function submitFinal() {
             if(isSubmitting) return; 
@@ -614,22 +627,20 @@
             });
         }
 
-        // --- MODALS ---
-
         function openBinModal() {
+            if (document.activeElement) document.activeElement.blur();
+
             if(!selectedItemCode) return;
             const modal = document.getElementById('binModal');
             const list = document.getElementById('binList');
             modal.style.display = 'flex';
             list.innerHTML = '';
 
-            // 1. USE CACHE IF AVAILABLE (Instant!)
             if (binCache[selectedItemCode]) {
                 populateBinList(binCache[selectedItemCode]);
                 return;
             }
 
-            // 2. FETCH IF NOT CACHED
             list.innerHTML = '<p style="padding:15px;">Loading from Server...</p>';
             
             if(!navigator.onLine) {
@@ -646,7 +657,7 @@
             .then(data => {
                 list.innerHTML = '';
                 if(data.status === 'success') {
-                    binCache[selectedItemCode] = data.bins; // Save to Cache
+                    binCache[selectedItemCode] = data.bins; 
                     populateBinList(data.bins);
                 } else {
                     list.innerHTML = `<div style="padding:15px; color:red;">${data.msg}</div>`;
@@ -667,13 +678,11 @@
             bins.forEach(bin => {
                 const row = document.createElement('div');
                 row.className = 'bin-row';
-                // Only display information; NO onclick handler added here.
                 row.innerHTML = `<span class="bin-name">${bin.bin}</span><span class="bin-qty">Qty: ${bin.qty}</span>`;
                 list.appendChild(row);
             });
         }
         
-        // Standard Modal Functions
         function openReviewModal() {
             const list = document.getElementById('reviewList');
             list.innerHTML = '';
