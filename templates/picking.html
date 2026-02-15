@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="scanner-card">
+    <h3>📦 Sales Order Pick</h3>
+    
+    {% if not so %}
+    <form method="GET" action="/picking">
+        <label>Scan Order #:</label>
+        <input type="text" name="so" class="scan-input" id="soInput" autofocus autocomplete="off">
+        <button type="submit" class="btn-large">Start Picking</button>
+    </form>
+    
+    {% else %}
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <strong>SO: {{ so }}</strong>
+        <a href="/picking" class="btn-sm" style="color: red;">Exit</a>
+    </div>
+
+    <div id="scanForm">
+        <input type="text" id="binInput" class="scan-input" placeholder="Scan BIN..." autocomplete="off">
+        <input type="text" id="itemInput" class="scan-input" placeholder="Scan ITEM..." autocomplete="off">
+        <input type="number" id="qtyInput" class="scan-input" value="1" style="width: 50%; display:inline-block;">
+        <button onclick="submitScan()" class="btn-large" style="margin-top:10px;">CONFIRM</button>
+    </div>
+
+    <hr>
+    
+    <h4>To Pick:</h4>
+    <div class="items-list">
+        {% for item in items %}
+        <div class="item-row">
+            <div>
+                <span style="font-size:1.1em; font-weight:bold;">{{ item.item }}</span><br>
+                <small class="text-muted">Line: {{ item.tranlineno }}</small>
+            </div>
+            <div>
+                <span class="qty-badge">{{ item.shipqty }} / {{ item.qtyord }}</span>
+            </div>
+        </div>
+        {% else %}
+        <div style="text-align:center; padding:20px; color: green;">
+            <h3>✅ Order Complete</h3>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+
+<script>
+    // Scanner Logic
+    const soInput = document.getElementById('soInput');
+    const binInput = document.getElementById('binInput');
+    const itemInput = document.getElementById('itemInput');
+    
+    // Auto-focus logic: Always keep cursor in the empty field
+    document.addEventListener('click', function() {
+        if(soInput && !soInput.value) soInput.focus();
+        else if(binInput && !binInput.value) binInput.focus();
+        else if(itemInput && !itemInput.value) itemInput.focus();
+    });
+
+    function submitScan() {
+        const data = {
+            so: "{{ so }}",
+            bin: binInput.value,
+            item: itemInput.value,
+            qty: document.getElementById('qtyInput').value
+        };
+
+        fetch('/process_scan', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if(data.status === 'success') {
+                // Play Success Beep (Optional)
+                alert("Picked!"); 
+                location.reload(); // Reload to update list
+            } else {
+                // Play Error Sound
+                alert("ERROR: " + data.msg);
+                itemInput.value = ''; // Clear bad scan
+                itemInput.focus();
+            }
+        });
+    }
+
+    // Auto-submit if Bin and Item are filled (simulating "Enter" from scanner)
+    if(itemInput) {
+        itemInput.addEventListener('keypress', function (e) {
+            if (e.key === 'Enter' && binInput.value !== "") {
+                submitScan();
+            }
+        });
+    }
+</script>
+{% endblock %}
