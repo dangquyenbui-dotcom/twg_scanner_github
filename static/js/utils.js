@@ -1,4 +1,4 @@
-/* utils.js - Generic Utilities (Audio, UUID, Logs) */
+/* utils.js - Generic Utilities (Audio, UUID, Logs, Device ID) */
 
 // --- UTILS ---
 function generateUUID() {
@@ -9,6 +9,18 @@ function generateUUID() {
         var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
         return v.toString(16);
     });
+}
+
+// NEW: Get or Create a Persistent Device ID
+function getDeviceId() {
+    let devId = localStorage.getItem('twg_device_id');
+    if (!devId) {
+        // Generate a pseudo-unique ID for this browser/device
+        const randomPart = Math.random().toString(36).substring(2, 10).toUpperCase();
+        devId = `TC52-${randomPart}`; 
+        localStorage.setItem('twg_device_id', devId);
+    }
+    return devId;
 }
 
 function log(msg) {

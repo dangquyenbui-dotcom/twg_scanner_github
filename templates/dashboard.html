@@ -3,69 +3,312 @@
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="mobile-web-app-capable" content="yes">
-    <meta name="theme-color" content="#3182ce">
+    <meta name="theme-color" content="#2b6cb0">
     <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
     
     <title>TWG Dashboard</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-</head>
-<body style="padding-top: 20px;">
     
-    <div class="container" style="max-width: 600px;">
+    <style>
+        /* DASHBOARD SPECIFIC STYLES */
+        body {
+            background-color: #f4f7fa;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        /* 1. TOP NAVIGATION */
+        .nav-bar {
+            background: #fff;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            flex: 0 0 auto;
+        }
+
+        /* UPDATED BRAND TITLE STYLE */
+        .brand-title {
+            font-size: 24px;
+            font-weight: 900;
+            color: #ff5722; /* TWG Orange */
+            letter-spacing: 1px;
+            /* Create the black outline effect */
+            text-shadow:
+                 2px  2px 0 #000,
+                -1px -1px 0 #000,  
+                 1px -1px 0 #000,
+                -1px  1px 0 #000,
+                 1px  1px 0 #000;
+            background: #2d3748; /* Dark background like the logo */
+            padding: 5px 15px;
+            border-radius: 8px;
+            display: inline-block;
+        }
+
+        .user-info {
+            text-align: right;
+        }
+        .user-id {
+            font-weight: bold;
+            color: #2d3748;
+            font-size: 14px;
+            display: block;
+        }
+        .user-loc {
+            font-size: 11px;
+            color: #718096;
+            text-transform: uppercase;
+            font-weight: bold;
+        }
+
+        /* 2. MAIN CONTENT AREA */
+        .main-content {
+            flex: 1;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            overflow-y: auto;
+        }
+
+        /* 3. HERO WIDGET (Clock) */
+        .hero-card {
+            background: linear-gradient(135deg, #2b6cb0 0%, #2c5282 100%);
+            border-radius: 12px;
+            padding: 25px;
+            text-align: center;
+            color: white;
+            box-shadow: 0 4px 6px rgba(44, 82, 130, 0.2);
+            flex: 0 0 auto;
+        }
+        .clock-time {
+            font-size: 36px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            font-variant-numeric: tabular-nums;
+            display: block;
+            margin-bottom: 5px;
+        }
+        .clock-date {
+            font-size: 14px;
+            opacity: 0.9;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        /* 4. APP GRID */
+        .app-section-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #718096;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            margin-bottom: 10px;
+        }
         
-        <div class="dashboard-header-card">
-            <div class="user-welcome">
-                <h3>Hi, {{ session['user_id'] }}</h3>
-                <p>📍 {{ session['location'] }}</p>
-            </div>
-            <a href="/logout" class="btn-sm btn-danger" style="text-decoration: none; padding: 10px;">
-                🚪 Logout
-            </a>
-        </div>
+        .app-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+        }
 
-        <div style="text-align: center; margin-bottom: 25px;">
-            <div class="clock-widget" style="display: inline-block; text-align: center; padding: 10px 25px; background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
-                <span id="timeDisplay" class="clock-time" style="font-size: 24px;">00:00:00</span>
-                <span id="dateDisplay" class="clock-date" style="font-size: 12px; margin-top: 4px;">Loading...</span>
-            </div>
-        </div>
+        /* APP CARDS */
+        .app-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px 10px;
+            text-align: center;
+            text-decoration: none;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.03);
+            border: 1px solid #e2e8f0;
+            transition: transform 0.1s, box-shadow 0.1s;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 140px;
+        }
+        .app-card:active {
+            transform: scale(0.98);
+            background-color: #f7fafc;
+        }
 
-        <h4 style="color: #718096; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; margin-bottom: 10px;">Apps</h4>
+        .app-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+            display: block;
+        }
+        
+        .app-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #2d3748;
+            display: block;
+        }
 
-        <div class="dashboard-grid">
-            <a href="/picking" class="menu-card">
-                <div class="menu-icon-box">📦</div>
-                <span class="menu-title">Order Pick</span>
-            </a>
-            <div class="menu-card" style="opacity: 0.5; background: #f7fafc; border-style: dashed;">
-                <div class="menu-icon-box" style="background: #cbd5e0;">⏳</div>
-                <span class="menu-title" style="color: #a0aec0;">Coming Soon</span>
-            </div>
-        </div>
+        .app-card.disabled {
+            opacity: 0.6;
+            background-color: #f7fafc;
+            border-style: dashed;
+            pointer-events: none;
+        }
 
-        <div style="text-align: center; margin-top: 40px; color: #cbd5e0; font-size: 12px;">
-            TWG WMS v1.3
+        /* 5. FOOTER */
+        .footer-bar {
+            text-align: center;
+            padding: 30px 20px; /* Increased padding */
+            flex: 0 0 auto;
+            background: #fff; /* White background for footer */
+            border-top: 1px solid #e2e8f0;
+        }
+        
+        /* UPDATED FOOTER BUTTON STYLE */
+        .btn-footer-action {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 12px 30px; /* Increased padding to prevent truncation */
+            background: white;
+            border: 2px solid #e53e3e;
+            color: #e53e3e;
+            border-radius: 30px;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 14px;
+            text-transform: uppercase;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: all 0.2s ease;
+            white-space: nowrap; /* Keep text on one line */
+            cursor: pointer;
+        }
+        .btn-footer-action:hover {
+            background: #e53e3e;
+            color: white;
+        }
+        
+        .version-text {
+            margin-top: 20px;
+            color: #cbd5e0;
+            font-size: 11px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="nav-bar">
+        <div class="brand-title">TWG - WMS</div>
+        <div class="user-info">
+            <span class="user-id">{{ session['user_id'] }}</span>
+            <span class="user-loc">📍 {{ session['location'] }}</span>
         </div>
     </div>
 
+    <div class="main-content">
+        
+        <div class="hero-card">
+            <span id="timeDisplay" class="clock-time">00:00:00</span>
+            <span id="dateDisplay" class="clock-date">Loading...</span>
+        </div>
+
+        <div>
+            <div class="app-section-title">Warehouse Operations</div>
+            <div class="app-grid">
+                
+                <a href="/picking" class="app-card" style="border-bottom: 4px solid #3182ce;">
+                    <span class="app-icon">📦</span>
+                    <span class="app-title">Order Pick</span>
+                </a>
+
+                <div class="app-card disabled">
+                    <span class="app-icon" style="filter: grayscale(100%); opacity: 0.5;">📊</span>
+                    <span class="app-title" style="color: #a0aec0;">Cycle Count</span>
+                </div>
+
+                <div class="app-card disabled">
+                    <span class="app-icon" style="filter: grayscale(100%); opacity: 0.5;">🚚</span>
+                    <span class="app-title" style="color: #a0aec0;">Receiving</span>
+                </div>
+
+                <div class="app-card disabled">
+                    <span class="app-icon" style="filter: grayscale(100%); opacity: 0.5;">🏷️</span>
+                    <span class="app-title" style="color: #a0aec0;">Label Print</span>
+                </div>
+
+            </div>
+        </div>
+
+    </div>
+
+    <div class="footer-bar">
+        <div style="display: flex; gap: 15px; justify-content: center;">
+            <a href="/logout" class="btn-footer-action">Sign Out</a>
+            
+            <button id="fs-toggle-btn" class="btn-footer-action" style="border-color: #2b6cb0; color: #2b6cb0;">
+                ⛶ Fullscreen
+            </button>
+        </div>
+        <div class="version-text">v1.6 • Connected</div>
+    </div>
+
     <script>
-        // --- UNIVERSAL FULLSCREEN TRIGGER ---
-        function forceFullscreen() {
+        // --- IMPROVED FULLSCREEN TOGGLE ---
+        const fsBtn = document.getElementById('fs-toggle-btn');
+        
+        function toggleFullscreen() {
             const doc = window.document;
             const docEl = doc.documentElement;
-            const requestFullScreen = docEl.requestFullscreen || docEl.mozRequestFullScreen || docEl.webkitRequestFullScreen || docEl.msRequestFullscreen;
-            if(!doc.fullscreenElement && !doc.mozFullScreenElement && !doc.webkitFullscreenElement && !doc.msFullscreenElement) {
-                if(requestFullScreen) requestFullScreen.call(docEl).catch(e=>{});
-            }
-        }
-        document.addEventListener('click', forceFullscreen, {once:true});
-        document.addEventListener('touchstart', forceFullscreen, {once:true});
 
-        // Clock Logic
+            // Check if already in fullscreen
+            const fullscreenElement = doc.fullscreenElement || doc.mozFullScreenElement || doc.webkitFullscreenElement || doc.msFullscreenElement;
+
+            if (!fullscreenElement) {
+                // Enter Fullscreen
+                const requestFullScreen = docEl.requestFullscreen || docEl.mozRequestFullScreen || docEl.webkitRequestFullScreen || docEl.msRequestFullscreen;
+                if (requestFullScreen) {
+                    requestFullScreen.call(docEl).catch(err => {
+                        console.error(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+                        alert("Fullscreen not supported or blocked by browser settings.");
+                    });
+                }
+            } else {
+                // Exit Fullscreen
+                const exitFullScreen = doc.exitFullscreen || doc.mozCancelFullScreen || doc.webkitExitFullscreen || doc.msExitFullscreen;
+                if (exitFullScreen) {
+                    exitFullScreen.call(doc).catch(err => {
+                         console.error(`Error attempting to exit full-screen mode: ${err.message} (${err.name})`);
+                    });
+                }
+            }
+            updateFullscreenButtonText();
+        }
+
+        function updateFullscreenButtonText() {
+             const doc = window.document;
+             const isFullscreen = doc.fullscreenElement || doc.mozFullScreenElement || doc.webkitFullscreenElement || doc.msFullscreenElement;
+             fsBtn.innerHTML = isFullscreen ? "⛶ Exit Fullscreen" : "⛶ Fullscreen";
+        }
+
+        if (fsBtn) {
+            // Add click listener to the button
+            fsBtn.addEventListener('click', toggleFullscreen);
+            // Update button text on load and on fullscreen change events
+            updateFullscreenButtonText();
+            ['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange', 'MSFullscreenChange'].forEach(
+                evt => document.addEventListener(evt, updateFullscreenButtonText)
+            );
+        }
+
+        // --- CLOCK LOGIC ---
         function updateClock() {
             const now = new Date();
-            const timeString = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' });
-            const dateString = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' });
+            // Use 12-hour format with AM/PM for cleaner look
+            const timeString = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }); 
+            const dateString = now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+            
             document.getElementById('timeDisplay').innerText = timeString;
             document.getElementById('dateDisplay').innerText = dateString;
         }

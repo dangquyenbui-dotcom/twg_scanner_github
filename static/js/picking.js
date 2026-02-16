@@ -165,8 +165,11 @@ function handleItemScan() {
 
 function submitFinal() {
     if(isSubmitting || sessionPicks.length===0) return;
+    
     if(!navigator.onLine) { alert("OFFLINE. Connect to Wi-Fi."); return; }
-    if(!confirm(`Submit ${sessionPicks.length} pick lines?`)) return;
+    
+    // USER CONFIRMATION (Required)
+    if(!confirm(`CONFIRM SUBMISSION:\n\nAre you sure you want to commit ${sessionPicks.length} pick lines to the database?`)) return;
     
     isSubmitting = true;
     const btn = document.getElementById('btnSubmit'); 
@@ -183,8 +186,10 @@ function submitFinal() {
     .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
     .then(d => {
         if(d.status === 'success') { 
-            showToast("Success!", 'success'); alert(d.msg); 
-            clearLocal(); setTimeout(() => location.reload(), 1500); 
+            playBeep('success'); // AUDIO CONFIRMATION
+            alert(d.msg); // VISUAL CONFIRMATION
+            clearLocal(); 
+            setTimeout(() => location.reload(), 1500); 
         } else { 
             alert("SERVER ERROR: "+d.msg); 
             resetSubmitBtn(btn, originalText);
@@ -278,7 +283,6 @@ function clearSession() {
     }
 }
 
-// Helper for soft-keyboard control
 function toggleKeyboard(id) { 
     unlockAudio(); const el = document.getElementById(id); 
     if(el.inputMode==='none') { el.inputMode='text'; el.blur(); setTimeout(()=>el.focus(),50); } 

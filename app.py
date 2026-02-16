@@ -40,7 +40,7 @@ def row_to_dict(cursor, row):
     return dict(zip(columns, row))
 
 def detect_columns():
-    """Dynamically detects column names to handle schema variations (aloc vs alloc)."""
+    """Dynamically detects column names to handle schema variations."""
     if DB_COLS['ScanOnhand2_Loc']: return 
     
     conn = get_db_connection()
@@ -54,12 +54,10 @@ def detect_columns():
             cursor.execute(f"SELECT TOP 1 * FROM {Config.DB_AUTH}.dbo.ScanOnhand2")
             cols = [c[0].lower() for c in cursor.description]
             
-            # Location Column
             if 'loctid' in cols: DB_COLS['ScanOnhand2_Loc'] = 'loctid'
             elif 'terr' in cols: DB_COLS['ScanOnhand2_Loc'] = 'terr'
             else: DB_COLS['ScanOnhand2_Loc'] = 'terr'
             
-            # Alloc Column (aloc vs alloc)
             if 'aloc' in cols: DB_COLS['ScanOnhand2_Alloc'] = 'aloc'
             elif 'alloc' in cols: DB_COLS['ScanOnhand2_Alloc'] = 'alloc'
             else: DB_COLS['ScanOnhand2_Alloc'] = 'aloc'
@@ -119,13 +117,10 @@ def login():
             if row:
                 user = row_to_dict(cursor, row)
                 session['user_id'] = user.get('userid', '').strip()
-                
-                # Determine Location
                 loc_col = DB_COLS['ScanUsers_Loc'] or 'location'
                 raw_loc = user.get(loc_col)
                 session['location'] = str(raw_loc).strip() if raw_loc else 'Unknown'
                 
-                # Update Online Status
                 try:
                     update_sql = f"UPDATE {Config.DB_AUTH}.dbo.ScanUsers SET userstat=1 WHERE userid=?"
                     cursor.execute(update_sql, (user_id_input,))
@@ -160,7 +155,6 @@ def picking_menu():
         try:
             cursor = conn.cursor()
             
-            # Validate Order
             check_sql = f"SELECT TOP 1 sono FROM {Config.DB_ORDERS}.dbo.SOTRAN WHERE sono LIKE ?"
             cursor.execute(check_sql, (f"%{raw_so.strip()}",))
             check_row = cursor.fetchone()
@@ -172,7 +166,6 @@ def picking_menu():
             resolved_so = check_row[0] 
             user_loc = session.get('location', 'Unknown').strip()
             
-            # Fetch Lines (Filter by Location)
             base_sql = f"""
                 SELECT tranlineno, item, qtyord, shipqty, (qtyord - shipqty) as remaining, loctid 
                 FROM {Config.DB_ORDERS}.dbo.SOTRAN 
@@ -215,7 +208,6 @@ def get_item_bins():
         loc_col = DB_COLS['ScanOnhand2_Loc'] or 'terr'
         alloc_col = DB_COLS['ScanOnhand2_Alloc'] or 'aloc'
 
-        # Fetch Data
         sql = f"""
             SELECT bin, onhand, {alloc_col}, {loc_col} 
             FROM {Config.DB_AUTH}.dbo.ScanOnhand2 
@@ -235,7 +227,6 @@ def get_item_bins():
         bins = []
         for row in rows:
             r = row_to_dict(cursor, row)
-            
             qty_onhand = int(r['onhand'])
             qty_alloc = int(r.get(alloc_col, 0)) 
             qty_avail = qty_onhand - qty_alloc
@@ -292,7 +283,8 @@ def validate_bin():
 @app.route('/process_batch_scan', methods=['POST'])
 def process_batch_scan():
     """
-    LIVE MODE: Updates ScanOnhand2
+    PRODUCTION MODE: Commits updates to ScanOnhand2, SOTRAN, and ScanBinTran2.
+    Uses a single transaction block for safety.
     """
     if 'user_id' not in session: return jsonify({'status':'error', 'msg':'Session expired'})
     detect_columns()
@@ -301,12 +293,14 @@ def process_batch_scan():
     picks = data.get('picks', [])
     so_num = data.get('so', '')
     batch_id = data.get('batch_id') or str(uuid.uuid4())
+    # Device ID is blank as requested
+    device_id = '' 
     user_id = session.get('user_id')
     user_loc = session.get('location', 'Unknown')
     
     if not picks: return jsonify({'status': 'error', 'msg': 'No picks to submit!'})
 
-    logging.info(f"--- PROCESSING BATCH {batch_id} ---")
+    logging.info(f"--- PROCESSING BATCH {batch_id} (FULL COMMIT) ---")
 
     conn = get_db_connection()
     if not conn: return jsonify({'status': 'error', 'msg': 'Database Unavailable'})
@@ -317,7 +311,9 @@ def process_batch_scan():
         col_loc = DB_COLS['ScanOnhand2_Loc'] or 'loctid'
         col_alloc = DB_COLS['ScanOnhand2_Alloc'] or 'aloc'
 
-        # --- PROCESS EACH PICK ---
+        # -------------------------------------------------------------------
+        # PART 1: Inventory Update (ScanOnhand2)
+        # -------------------------------------------------------------------
         for pick in picks:
             item = pick.get('item', '').strip()
             bin_val = pick.get('bin', '').strip()
@@ -325,8 +321,7 @@ def process_batch_scan():
 
             if qty <= 0: continue
 
-            # Construct Update SQL
-            update_sql = f"""
+            update_inv_sql = f"""
                 UPDATE {Config.DB_AUTH}.dbo.ScanOnhand2
                 SET {col_alloc} = {col_alloc} + ?, 
                     avail = onhand - ({col_alloc} + ?),
@@ -334,24 +329,72 @@ def process_batch_scan():
                     luser = ?
                 WHERE item=? AND bin=? AND {col_loc}=?
             """
+            cursor.execute(update_inv_sql, (qty, qty, user_id, item, bin_val, user_loc))
             
-            # Execute Update
-            cursor.execute(update_sql, (qty, qty, user_id, item, bin_val, user_loc))
+            # Double Check: Ensure the bin existed
+            if cursor.rowcount == 0:
+                raise Exception(f"Inventory Update Failed: {item} at {bin_val} not found in {user_loc}")
 
-        # --- COMMIT TRANSACTION ---
+        # -------------------------------------------------------------------
+        # PART 2: Sales Order Update (SOTRAN)
+        # -------------------------------------------------------------------
+        line_updates = {}
+        for pick in picks:
+            line_no = pick.get('lineNo')
+            qty = float(pick.get('qty', 0))
+            item = pick.get('item', '').strip()
+            
+            if line_no not in line_updates:
+                line_updates[line_no] = {'qty': 0.0, 'item': item}
+            line_updates[line_no]['qty'] += qty
+
+        for line_no, data in line_updates.items():
+            agg_qty = data['qty']
+            item_code = data['item']
+
+            update_so_sql = f"""
+                UPDATE {Config.DB_ORDERS}.dbo.SOTRAN
+                SET shipqty = shipqty + ?,
+                    shipdate = GETDATE()
+                WHERE sono=? AND tranlineno=? AND item=?
+            """
+            cursor.execute(update_so_sql, (agg_qty, so_num, line_no, item_code))
+            
+            # Double Check: Ensure the order line existed
+            if cursor.rowcount == 0:
+                raise Exception(f"Order Update Failed: Line {line_no} for {item_code} not found.")
+
+        # -------------------------------------------------------------------
+        # PART 3: Audit Log (ScanBinTran2)
+        # -------------------------------------------------------------------
+        for pick in picks:
+            line_no = pick.get('lineNo')
+            qty = float(pick.get('qty', 0))
+            item = pick.get('item', '').strip()
+            bin_val = pick.get('bin', '').strip()
+            upc_val = item 
+
+            insert_sql = f"""
+                INSERT INTO {Config.DB_AUTH}.dbo.ScanBinTran2 
+                (actiontype, applid, udref, tranlineno, upc, item, binfr, quantity, userid, deviceid, adddate)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE())
+            """
+            cursor.execute(insert_sql, ('SP', 'SO', so_num, line_no, upc_val, item, bin_val, qty, user_id, device_id))
+
+        # --- FINAL COMMIT ---
         conn.commit()
-        logging.info(f"--- COMMITTED BATCH {batch_id} ---")
+        logging.info(f"--- SUCCESS: COMMITTED BATCH {batch_id} ---")
         
         return jsonify({
             'status': 'success', 
-            'msg': f"Saved {len(picks)} lines successfully.",
+            'msg': f"SUCCESS: Processed {len(picks)} lines.\nUpdated Inventory & Order.",
             'batch_id': batch_id
         })
 
     except Exception as e:
         conn.rollback()
         logging.error(f"Batch Failed: {e}")
-        return jsonify({'status': 'error', 'msg': f"Save Failed: {str(e)}"})
+        return jsonify({'status': 'error', 'msg': f"Database Error: {str(e)}"})
     finally:
         if conn: conn.close()
 
