@@ -84,10 +84,10 @@
             </table>
         </div>
 
-        <div class="tc52-controls" id="scanForm">
+        <form class="tc52-controls" id="scanForm" onsubmit="return false;">
             
             <div class="control-row" style="justify-content: space-between;">
-                <button id="btnViewBins" class="btn-small-action" onclick="openBinModal()" style="background:#4a5568;">🔍 Bins</button>
+                <button type="button" id="btnViewBins" class="btn-small-action" onclick="openBinModal()" style="background:#4a5568;">🔍 Bins</button>
                 <div style="display:flex;">
                     <label class="mode-label"><input type="radio" name="pickMode" value="auto" checked onchange="updateMode()"> Auto</label>
                     <label class="mode-label"><input type="radio" name="pickMode" value="manual" onchange="updateMode()"> Manual</label>
@@ -97,7 +97,7 @@
             <div class="control-row">
                 <span class="control-label">Scan Bin</span>
                 <div class="input-wrapper">
-                    <input type="text" id="binInput" class="scan-input" placeholder="Scan..." autocomplete="off">
+                    <input type="text" name="bin" id="binInput" class="scan-input" placeholder="Scan..." autocomplete="off">
                     <button type="button" class="btn-keyboard" onclick="toggleKeyboard('binInput')">⌨</button>
                 </div>
             </div>
@@ -105,7 +105,7 @@
             <div class="control-row">
                 <span class="control-label">Scan Item</span>
                 <div class="input-wrapper">
-                    <input type="text" id="itemInput" class="scan-input" placeholder="Scan..." autocomplete="off">
+                    <input type="text" name="item" id="itemInput" class="scan-input" placeholder="Scan..." autocomplete="off">
                     <button type="button" class="btn-keyboard" onclick="toggleKeyboard('itemInput')">⌨</button>
                 </div>
             </div>
@@ -113,19 +113,19 @@
             <div class="control-row">
                 <span class="control-label">Pick Qty</span>
                 <div class="input-wrapper">
-                    <button id="btnMinus" class="btn-keyboard d-none" onclick="adjustQty(-1)" style="width:34px;">➖</button>
+                    <button type="button" id="btnMinus" class="btn-keyboard d-none" onclick="adjustQty(-1)" style="width:34px;">➖</button>
                     <input type="number" id="qtyInput" class="scan-input text-center" value="0" style="font-weight:bold;" readonly>
-                    <button id="btnPlus" class="btn-keyboard d-none" onclick="adjustQty(1)" style="width:34px;">➕</button>
-                    <button id="addBtnContainer" class="btn-small-action d-none" onclick="addToSession()" style="background:#38a169; height:34px; margin-left:4px;">ADD</button>
+                    <button type="button" id="btnPlus" class="btn-keyboard d-none" onclick="adjustQty(1)" style="width:34px;">➕</button>
+                    <button type="button" id="addBtnContainer" class="btn-small-action d-none" onclick="addToSession()" style="background:#38a169; height:34px; margin-left:4px;">ADD</button>
                 </div>
             </div>
 
             <div class="btn-footer-group">
                 <a href="/dashboard" class="btn-footer btn-exit" style="text-decoration:none;">Exit</a>
-                <button class="btn-footer btn-view" onclick="openReviewModal()">View <span id="scanCount">(0)</span></button>
-                <button id="btnSubmit" class="btn-footer btn-submit" onclick="submitFinal()">Submit</button>
+                <button type="button" class="btn-footer btn-view" onclick="openReviewModal()">View <span id="scanCount">(0)</span></button>
+                <button type="button" id="btnSubmit" class="btn-footer btn-submit" onclick="submitFinal()">Submit</button>
             </div>
-        </div>
+        </form>
     </div>
     {% endif %}
 
@@ -258,6 +258,21 @@
             else { el.inputMode = 'none'; log(`${inputId} Keyboard: OFF`); el.blur(); }
         }
 
+        // --- FOCUS HELPER (Safe Focus) ---
+        // Prevents keyboard popup during programmatic focus, then enables text input
+        function safeFocus(id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            // 1. Disable keyboard trigger
+            el.inputMode = 'none';
+            // 2. Focus
+            el.focus();
+            // 3. Re-enable text input shortly after (allows scanner data to enter)
+            setTimeout(() => {
+                el.inputMode = 'text'; 
+            }, 300); 
+        }
+
         // --- STORAGE & LOGIC ---
         function saveToLocal() {
             if(!SO_NUMBER) return;
@@ -272,18 +287,15 @@
         function updateMode() {
             isAutoMode = document.querySelector('input[name="pickMode"]:checked').value === 'auto';
             const qtyInput = document.getElementById('qtyInput');
-            const binIn = document.getElementById('binInput');
             const itemIn = document.getElementById('itemInput');
             
             if (isAutoMode) {
                 qtyInput.readOnly = true; 
                 document.getElementById('btnMinus').classList.add('d-none'); document.getElementById('btnPlus').classList.add('d-none'); document.getElementById('addBtnContainer').classList.add('d-none');
-                if(binIn) binIn.inputMode = 'none'; if(itemIn) itemIn.inputMode = 'none';
-                if(currentBin && itemIn) setTimeout(() => itemIn.focus(), 100);
+                if(currentBin && itemIn) setTimeout(() => safeFocus('itemInput'), 100);
             } else {
                 qtyInput.readOnly = false; 
                 document.getElementById('btnMinus').classList.remove('d-none'); document.getElementById('btnPlus').classList.remove('d-none'); document.getElementById('addBtnContainer').classList.remove('d-none');
-                if(binIn) binIn.inputMode = 'text'; if(itemIn) itemIn.inputMode = 'text';
             }
         }
 
@@ -295,7 +307,10 @@
             document.getElementById('binInput').value = ''; document.getElementById('itemInput').value = '';
             updateSessionDisplay();
             currentBinMaxQty = 999999; 
-            setTimeout(() => { const b = document.getElementById('binInput'); if(b) b.focus(); }, 100);
+            
+            // Use safeFocus to prevent keyboard
+            setTimeout(() => { safeFocus('binInput'); }, 100);
+            
             prefetchBins(itemCode);
         }
 
@@ -305,15 +320,24 @@
             log(`Validating Bin: ${binVal}`);
             if (binCache[selectedItemCode]) {
                 const f = binCache[selectedItemCode].find(b => b.bin === binVal);
-                if (f) { currentBinMaxQty = f.qty; currentBin = binVal; showToast(`Bin Verified. Max: ${f.qty}`, 'success'); document.getElementById('itemInput').focus(); return; }
+                if (f) { 
+                    currentBinMaxQty = f.qty; currentBin = binVal; 
+                    showToast(`Bin Verified. Max: ${f.qty}`, 'success'); 
+                    safeFocus('itemInput'); // Move to item without keyboard
+                    return; 
+                }
             }
             if (!navigator.onLine) { showToast("Offline: Cannot verify.", 'warning'); return; }
             fetch('/validate_bin', {
                 method: 'POST', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ bin: binVal, item: selectedItemCode })
             }).then(r=>r.json()).then(d => {
-                if(d.status === 'success') { currentBinMaxQty = d.onhand; currentBin = binVal; showToast(`Bin Verified. Max: ${d.onhand}`, 'success'); document.getElementById('itemInput').focus(); }
-                else { showToast(d.msg, 'error'); document.getElementById('binInput').value=''; document.getElementById('binInput').focus(); }
+                if(d.status === 'success') { 
+                    currentBinMaxQty = d.onhand; currentBin = binVal; 
+                    showToast(`Bin Verified. Max: ${d.onhand}`, 'success'); 
+                    safeFocus('itemInput'); // Move to item without keyboard
+                }
+                else { showToast(d.msg, 'error'); document.getElementById('binInput').value=''; safeFocus('binInput'); }
             }).catch(()=> showToast("Network Error", 'error'));
         }
 
@@ -335,7 +359,9 @@
             q.classList.remove('flash-active'); void q.offsetWidth; q.classList.add('flash-active');
             updateSessionDisplay(); showToast(`Added ${qty} x ${selectedItemCode}`, 'success');
             document.getElementById('itemInput').value = '';
-            if(isAutoMode) setTimeout(() => document.getElementById('itemInput').focus(), 50);
+            
+            // Re-focus item for next scan without keyboard
+            if(isAutoMode) setTimeout(() => safeFocus('itemInput'), 50);
         }
 
         function handleItemScan() {
