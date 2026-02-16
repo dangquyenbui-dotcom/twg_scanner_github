@@ -2,12 +2,9 @@
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="mobile-web-app-capable" content="yes">
-    <meta name="theme-color" content="#3182ce">
-    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
-    
     <title>TWG Dashboard</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body style="padding-top: 20px;">
     
@@ -16,59 +13,69 @@
         <div class="dashboard-header-card">
             <div class="user-welcome">
                 <h3>Hi, {{ session['user_id'] }}</h3>
-                <p>📍 {{ session['location'] }}</p>
+                <p><i class="fas fa-map-marker-alt"></i> {{ session['location'] }}</p>
             </div>
-            <a href="/logout" class="btn-sm btn-danger" style="text-decoration: none; padding: 10px;">
-                🚪 Logout
+            <a href="/logout" class="btn-sm btn-danger" style="text-decoration: none;">
+                <i class="fas fa-sign-out-alt"></i>
             </a>
         </div>
 
         <div style="text-align: center; margin-bottom: 25px;">
             <div class="clock-widget" style="display: inline-block; text-align: center; padding: 10px 25px; background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
                 <span id="timeDisplay" class="clock-time" style="font-size: 24px;">00:00:00</span>
-                <span id="dateDisplay" class="clock-date" style="font-size: 12px; margin-top: 4px;">Loading...</span>
+                <span id="dateDisplay" class="clock-date" style="font-size: 12px; margin-top: 4px;">Loading Date...</span>
             </div>
         </div>
 
         <h4 style="color: #718096; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; margin-bottom: 10px;">Apps</h4>
 
         <div class="dashboard-grid">
+            
             <a href="/picking" class="menu-card">
-                <div class="menu-icon-box">📦</div>
+                <div class="menu-icon-box">
+                    <i class="fas fa-dolly-flatbed"></i>
+                </div>
                 <span class="menu-title">Order Pick</span>
             </a>
+
             <div class="menu-card" style="opacity: 0.5; background: #f7fafc; border-style: dashed;">
-                <div class="menu-icon-box" style="background: #cbd5e0;">⏳</div>
+                <div class="menu-icon-box" style="background: #cbd5e0;">
+                    <i class="fas fa-box-open"></i>
+                </div>
                 <span class="menu-title" style="color: #a0aec0;">Coming Soon</span>
             </div>
+
         </div>
 
         <div style="text-align: center; margin-top: 40px; color: #cbd5e0; font-size: 12px;">
-            TWG WMS v1.3
+            TWG WMS v1.0
         </div>
     </div>
 
     <script>
-        // --- UNIVERSAL FULLSCREEN TRIGGER ---
-        function forceFullscreen() {
-            const doc = window.document;
-            const docEl = doc.documentElement;
-            const requestFullScreen = docEl.requestFullscreen || docEl.mozRequestFullScreen || docEl.webkitRequestFullScreen || docEl.msRequestFullscreen;
-            if(!doc.fullscreenElement && !doc.mozFullScreenElement && !doc.webkitFullscreenElement && !doc.msFullscreenElement) {
-                if(requestFullScreen) requestFullScreen.call(docEl).catch(e=>{});
-            }
-        }
-        document.addEventListener('click', forceFullscreen, {once:true});
-        document.addEventListener('touchstart', forceFullscreen, {once:true});
-
-        // Clock Logic
         function updateClock() {
             const now = new Date();
-            const timeString = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' });
-            const dateString = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' });
+            
+            // Format Time (12-hour with AM/PM)
+            const timeString = now.toLocaleTimeString('en-US', { 
+                hour: 'numeric', 
+                minute: '2-digit', 
+                second: '2-digit' 
+            });
+            
+            // Format Date
+            const dateString = now.toLocaleDateString('en-US', { 
+                weekday: 'long', 
+                year: 'numeric', 
+                month: 'short', 
+                day: 'numeric' 
+            });
+
             document.getElementById('timeDisplay').innerText = timeString;
             document.getElementById('dateDisplay').innerText = dateString;
         }
+
+        // Update immediately, then every second
         updateClock();
         setInterval(updateClock, 1000);
     </script>
