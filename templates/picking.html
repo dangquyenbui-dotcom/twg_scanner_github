@@ -6,7 +6,6 @@
     <title>Picking - {{ so }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <style>
-        /* Embedded CSS to handle specific alignments */
         .mode-label { font-size: 12px; font-weight: bold; margin-right: 8px; display: flex; align-items: center; }
         .mode-label input { margin-right: 4px; transform: scale(1.2); }
         #debugConsole { display: none; position: fixed; top: 25px; left: 0; right:0; height: 100px; background: rgba(0,0,0,0.8); color: lime; z-index: 9999; overflow-y: scroll; font-size: 10px; padding: 5px;}
@@ -193,19 +192,46 @@
         let currentBinMaxQty = 999999, currentOrderMaxQty = 999999, currentBin = ""; 
         let isAutoMode = true, isSubmitting = false;
 
-        // --- AUDIO ---
+        // --- AUDIO ENGINE ---
+        // Robust audio handling for mobile browsers
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        let audioUnlocked = false;
-        function unlockAudio() { if (!audioUnlocked && audioCtx.state === 'suspended') { audioCtx.resume().then(() => { audioUnlocked = true; }); } }
-        document.body.addEventListener('touchstart', unlockAudio, {once:true});
-        document.body.addEventListener('click', unlockAudio, {once:true});
+        
+        function unlockAudio() { 
+            if (audioCtx.state === 'suspended') { 
+                audioCtx.resume().then(() => log("Audio Resumed")); 
+            }
+        }
+        
+        // Aggressively unlock audio on any interaction
+        ['touchstart', 'click', 'keydown', 'mousedown'].forEach(evt => {
+            document.body.addEventListener(evt, unlockAudio, {once:false, passive:true});
+        });
+
         function playBeep(type) {
-            if (audioCtx.state === 'suspended') audioCtx.resume();
-            const osc = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            osc.connect(gain); gain.connect(audioCtx.destination);
-            if (type === 'success') { osc.frequency.value = 1200; gain.gain.value = 0.1; osc.start(); osc.stop(audioCtx.currentTime + 0.1); } 
-            else { osc.frequency.value = 200; gain.gain.value = 0.2; osc.type = 'sawtooth'; osc.start(); osc.stop(audioCtx.currentTime + 0.4); }
+            try {
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain); 
+                gain.connect(audioCtx.destination);
+                
+                if (type === 'success') { 
+                    osc.frequency.value = 1500; // Distinct High Pitch
+                    osc.type = 'sine';
+                    gain.gain.value = 0.3; // Louder
+                    osc.start(); 
+                    osc.stop(audioCtx.currentTime + 0.15); 
+                } else { 
+                    osc.frequency.value = 150; // Deep Buzz
+                    osc.type = 'sawtooth';
+                    gain.gain.value = 0.4; // Louder
+                    osc.start(); 
+                    osc.stop(audioCtx.currentTime + 0.4); 
+                }
+            } catch(e) {
+                console.error("Audio Error:", e);
+            }
         }
 
         // --- INIT ---
@@ -231,27 +257,43 @@
         function attachScannerListeners() {
             const inputs = document.querySelectorAll('input.scan-input');
             inputs.forEach(el => {
-                el.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter' || e.keyCode === 13) { e.preventDefault(); handleAction(el); }
-                });
                 let debounceTimer;
+
+                // 1. Handle "Enter" Key (Standard Scanners)
+                el.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' || e.keyCode === 13) { 
+                        e.preventDefault(); 
+                        clearTimeout(debounceTimer); 
+                        handleAction(el); 
+                    }
+                });
+
+                // 2. Handle "Input" (Keyboard Mode Scanners)
                 el.addEventListener('input', () => {
                     clearTimeout(debounceTimer);
+                    // Reduced delay for snappier feel (150ms)
                     debounceTimer = setTimeout(() => {
-                        if (el.value.length > 2) { log(`Auto-Submitting: ${el.id}`); handleAction(el); }
-                    }, 300);
+                        if (el.value.length > 2) { 
+                            log(`Auto-Submitting: ${el.id}`); 
+                            handleAction(el); 
+                        }
+                    }, 150);
                 });
             });
         }
 
         function handleAction(el) {
             if (el.value.trim() === "") return;
+            unlockAudio(); // Ensure audio is ready
+
             if (el.id === 'soInput') document.getElementById('soForm').submit();
             else if (el.id === 'binInput') validateBin();
             else if (el.id === 'itemInput') handleItemScan();
+            else if (el.id === 'qtyInput') addToSession(); 
         }
 
         function toggleKeyboard(inputId) {
+            unlockAudio(); 
             const el = document.getElementById(inputId);
             if (!el) return;
             if (el.inputMode === 'none') { el.inputMode = 'text'; log(`${inputId} Keyboard: ON`); el.blur(); setTimeout(() => el.focus(), 50); } 
@@ -261,7 +303,7 @@
         function safeFocus(id) {
             const el = document.getElementById(id);
             if (!el) return;
-            el.inputMode = 'none'; // Prevent keyboard popup
+            el.inputMode = 'none'; 
             el.focus();
             setTimeout(() => { el.inputMode = 'text'; }, 300); 
         }
@@ -278,29 +320,29 @@
         function clearLocal() { localStorage.removeItem(`twg_picks_${SO_NUMBER}`); localStorage.removeItem(`twg_batch_id_${SO_NUMBER}`); sessionPicks = []; updateSessionDisplay(); saveToLocal(); }
 
         function updateMode() {
+            unlockAudio();
             isAutoMode = document.querySelector('input[name="pickMode"]:checked').value === 'auto';
             const qtyInput = document.getElementById('qtyInput');
             
             if (isAutoMode) {
                 qtyInput.readOnly = true; 
-                qtyInput.value = 1; // Default to 1 for Auto
+                qtyInput.value = 1; 
                 document.getElementById('btnMinus').classList.add('d-none'); document.getElementById('btnPlus').classList.add('d-none'); document.getElementById('addBtnContainer').classList.add('d-none');
                 if(currentBin) setTimeout(() => safeFocus('itemInput'), 100);
             } else {
                 qtyInput.readOnly = false; 
-                // Don't reset value here, let user see what they are doing
                 document.getElementById('btnMinus').classList.remove('d-none'); document.getElementById('btnPlus').classList.remove('d-none'); document.getElementById('addBtnContainer').classList.remove('d-none');
             }
         }
 
         function selectRow(row, itemCode, remainingQty, lineNo) {
+            unlockAudio();
             document.querySelectorAll('.item-row').forEach(r => r.classList.remove('active-row'));
             row.classList.add('active-row');
             selectedItemCode = itemCode; selectedLineNo = lineNo; currentOrderMaxQty = remainingQty;
             
             document.getElementById('binInput').value = ''; document.getElementById('itemInput').value = '';
             
-            // Only update the totals in the table, don't overwrite the input yet
             updateSessionDisplay();
             
             currentBinMaxQty = 999999; 
@@ -313,7 +355,6 @@
             if(!binVal || !selectedItemCode) return;
             log(`Validating Bin: ${binVal}`);
             
-            // Check cache first
             if (binCache[selectedItemCode]) {
                 const f = binCache[selectedItemCode].find(b => b.bin === binVal);
                 if (f) { 
@@ -340,63 +381,73 @@
         }
 
         function addToSession() {
+            // Pre-checks
             if(!selectedItemCode) { showToast("Select item first!", 'warning'); return; }
             if(document.getElementById('binInput').value.trim() !== currentBin) { showToast("Validate bin first", 'warning'); return; }
             
             let qty = isAutoMode ? 1 : (parseFloat(document.getElementById('qtyInput').value)||0);
             if(qty <= 0) return;
 
-            // 1. Calculate current totals including what's already in session
-            const currentLineTotal = sessionPicks.filter(p => p.lineNo === selectedLineNo).reduce((s,p) => s + p.qty, 0);
-            const currentBinTotal = sessionPicks.filter(p => p.item === selectedItemCode && p.bin === currentBin).reduce((s,p) => s + p.qty, 0);
+            let success = false;
+            try {
+                // 1. Calculate current totals
+                const currentLineTotal = sessionPicks.filter(p => p.lineNo === selectedLineNo).reduce((s,p) => s + p.qty, 0);
+                const currentBinTotal = sessionPicks.filter(p => p.item === selectedItemCode && p.bin === currentBin).reduce((s,p) => s + p.qty, 0);
 
-            // 2. Limit Checks
-            if(currentBinTotal + qty > currentBinMaxQty) { showToast(`BIN LIMIT EXCEEDED (Max: ${currentBinMaxQty})`, 'error'); return; }
-            if(currentLineTotal + qty > currentOrderMaxQty) { showToast(`ORDER LIMIT EXCEEDED (Need: ${currentOrderMaxQty})`, 'error'); return; }
+                // 2. Limit Checks
+                if(currentBinTotal + qty > currentBinMaxQty) { showToast(`BIN LIMIT EXCEEDED (Max: ${currentBinMaxQty})`, 'error'); return; }
+                if(currentLineTotal + qty > currentOrderMaxQty) { showToast(`ORDER LIMIT EXCEEDED (Need: ${currentOrderMaxQty})`, 'error'); return; }
 
-            // 3. AGGREGATION LOGIC: Check if this Item+Bin+Line already exists
-            const existingIndex = sessionPicks.findIndex(p => p.lineNo === selectedLineNo && p.bin === currentBin && p.item === selectedItemCode);
-            
-            if (existingIndex > -1) {
-                // Update existing entry
-                sessionPicks[existingIndex].qty += qty;
-                log(`Aggregated +${qty} to existing entry.`);
-            } else {
-                // Add new entry
-                sessionPicks.push({ id:Date.now(), lineNo:selectedLineNo, item:selectedItemCode, bin:currentBin, qty:qty });
-                log(`Added new entry: ${qty}`);
+                // 3. SUCCESS ACTION
+                // PLAY BEEP INSTANTLY
+                playBeep('success');
+
+                // 4. AGGREGATION LOGIC
+                const existingIndex = sessionPicks.findIndex(p => p.lineNo === selectedLineNo && p.bin === currentBin && p.item === selectedItemCode);
+                
+                if (existingIndex > -1) {
+                    sessionPicks[existingIndex].qty += qty;
+                    log(`Aggregated +${qty} to existing entry.`);
+                } else {
+                    sessionPicks.push({ id:Date.now(), lineNo:selectedLineNo, item:selectedItemCode, bin:currentBin, qty:qty });
+                    log(`Added new entry: ${qty}`);
+                }
+
+                success = true;
+
+                // 5. INSTANT UI REFRESH (Before storage)
+                updateSessionDisplay(); 
+                
+                // Visual feedback
+                const q = document.getElementById('qtyInput');
+                q.classList.remove('flash-active'); void q.offsetWidth; q.classList.add('flash-active');
+
+                // 6. Background Save
+                setTimeout(saveToLocal, 0);
+                
+                showToast(`Added ${qty} x ${selectedItemCode}`, 'success', false); // False = no beep (already played)
+                
+            } finally {
+                // CLEANUP: Always clear input in AutoMode
+                if(isAutoMode) {
+                    document.getElementById('itemInput').value = '';
+                    setTimeout(() => safeFocus('itemInput'), 50);
+                } else {
+                    if(success) document.getElementById('qtyInput').value = 1;
+                }
             }
-
-            saveToLocal();
-            
-            // Visual feedback
-            const q = document.getElementById('qtyInput');
-            q.classList.remove('flash-active'); void q.offsetWidth; q.classList.add('flash-active');
-            
-            updateSessionDisplay(); 
-            showToast(`Added ${qty} x ${selectedItemCode}`, 'success');
-            
-            document.getElementById('itemInput').value = '';
-            
-            // Reset Manual Input to 1 for convenience
-            if (!isAutoMode) {
-                document.getElementById('qtyInput').value = 1;
-            }
-            
-            // Re-focus
-            if(isAutoMode) setTimeout(() => safeFocus('itemInput'), 50);
         }
 
         function handleItemScan() {
             const scan = document.getElementById('itemInput').value.trim();
             if(!selectedItemCode || !scan) return;
             
-            // Flexible matching
             const match = scan.toLowerCase().includes(selectedItemCode.trim().toLowerCase()) || selectedItemCode.toLowerCase().includes(scan.toLowerCase());
             
             if(!match) {
                 showToast("Wrong Item!", 'error'); 
                 document.getElementById('itemInput').value=''; 
+                if(isAutoMode) setTimeout(() => safeFocus('itemInput'), 50);
                 return;
             }
             
@@ -440,15 +491,16 @@
 
         // --- HELPERS ---
         function updateSessionDisplay() {
-            // Update the count on the VIEW button
-            const btnView = document.getElementById('scanCount');
-            // We show distinct lines now, or total qty? Let's show distinct lines (cleaner)
-            if(btnView) btnView.innerText = `(${sessionPicks.length})`;
+            // FIX: Calculate Total Qty instead of just number of unique lines
+            const totalQty = sessionPicks.reduce((acc, p) => acc + p.qty, 0);
             
-            // Reset all table counters
+            const btnView = document.getElementById('scanCount');
+            if(btnView) btnView.innerText = `(${totalQty})`;
+            
+            // Reset grid cells first
             document.querySelectorAll('.picked-cell').forEach(c => c.innerText = "0");
             
-            // Sum up quantities for the Table View
+            // Fast DOM Update
             sessionPicks.forEach(p => { 
                 const c = document.querySelector(`.picked-cell[data-line="${p.lineNo}"]`); 
                 if(c) {
@@ -456,9 +508,6 @@
                     c.innerText = currentVal + p.qty; 
                 }
             });
-            
-            // NOTE: We do NOT overwrite qtyInput here anymore.
-            // qtyInput stays as the "User Entry Field".
         }
 
         function adjustQty(n) { 
@@ -468,12 +517,14 @@
             } 
         }
 
-        function showToast(m,t='info'){ 
+        function showToast(m, t='info', playSound=true){ 
             const c=document.getElementById('toastContainer'); 
             const d=document.createElement('div'); 
             d.style.cssText = `background:${t=='error'?'#e53e3e':'#38a169'}; color:white; padding:10px 20px; border-radius:4px; margin-bottom:10px; box-shadow:0 4px 6px rgba(0,0,0,0.1); font-weight:bold; font-size:14px;`;
             d.innerText=m; c.appendChild(d);
-            playBeep(t==='error'?'error':'success');
+            
+            if(playSound) playBeep(t==='error'?'error':'success');
+            
             setTimeout(()=>{ d.style.opacity='0'; setTimeout(()=>d.remove(),300); }, 2000);
         }
 
@@ -508,7 +559,6 @@
 
         function openReviewModal(){
             const l=document.getElementById('reviewList'); l.innerHTML='';
-            // Because we aggregate, this list is now clean and doesn't repeat items
             sessionPicks.forEach((p,i)=>{ 
                 l.innerHTML+=`<tr><td>${p.item}</td><td>${p.bin}</td><td style="font-weight:bold;">${p.qty}</td><td><button class="btn-small-action" style="background:#e53e3e; padding: 2px 8px;" onclick="removePick(${i})">X</button></td></tr>`; 
             });
