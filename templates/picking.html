@@ -166,3 +166,16 @@
     <script src="{{ url_for('static', filename='js/picking.js') }}"></script>
 </body>
 </html>
+<div id="debugConsole"></div>
+
+    <script>
+        const SERVER_DATA = {
+            soNumber: "{{ so|default('', true) }}"
+        };
+    </script>
+    
+    <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/picking-ui.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/picking.js') }}"></script>
+</body>
+</html>
