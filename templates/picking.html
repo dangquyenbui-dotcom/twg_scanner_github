@@ -3,170 +3,169 @@
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="theme-color" content="#3182ce">
-    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
-    
     <title>Picking - {{ so }}</title>
-    
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <style>
-        /* DEBUG CONSOLE */
-        #debugConsole { display: none; position: fixed; bottom: 0; left: 0; width: 100%; height: 120px; background: rgba(0,0,0,0.9); color: #00ff00; font-family: monospace; font-size: 11px; overflow-y: scroll; padding: 8px; z-index: 99999; border-top: 2px solid #00ff00; }
-        .log-line { border-bottom: 1px solid #333; padding: 2px 0; }
-        /* KEYBOARD TOGGLE WRAPPER */
-        .input-wrapper { position: relative; display: flex; gap: 8px; align-items: center; }
-        .btn-keyboard { background: #e2e8f0; border: 1px solid #cbd5e0; border-radius: 8px; width: 50px; height: 50px; font-size: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #4a5568; }
-        .btn-keyboard:active { background: #cbd5e0; }
+        /* Embedded CSS to handle specific alignments */
+        .mode-label { font-size: 12px; font-weight: bold; margin-right: 8px; display: flex; align-items: center; }
+        .mode-label input { margin-right: 4px; transform: scale(1.2); }
+        #debugConsole { display: none; position: fixed; top: 25px; left: 0; right:0; height: 100px; background: rgba(0,0,0,0.8); color: lime; z-index: 9999; overflow-y: scroll; font-size: 10px; padding: 5px;}
     </style>
 </head>
-<body style="padding-top: 40px;"> 
+<body>
     
     <div id="statusBar" class="status-bar status-online">
-        <span id="statusText">📶 SYSTEM ONLINE</span>
-        <span id="pendingCount" style="display:none; margin-left:10px; background:rgba(0,0,0,0.2); padding:2px 6px; border-radius:4px; font-size:11px;">0 Pending</span>
-        <button onclick="toggleDebug()" style="margin-left:auto; margin-right:10px; background:none; border:none; color:white; font-size:10px; text-decoration:underline; cursor:pointer;">DEBUG</button>
+        <span id="statusText">📶 ONLINE</span>
+        <span id="pendingCount" style="display:none; background:#4a5568; padding:0 4px; border-radius:2px;">0</span>
+        <button onclick="toggleDebug()" style="background:none; border:none; color:white; font-size:12px;">🐞</button>
     </div>
 
-    <div class="container" style="max-width: 600px; margin-bottom: 150px;">
-        
-        <div class="nav-header">
-            <a href="/dashboard" class="back-btn">⬅ Home</a>
-            <span class="user-info">{{ session['user_id'] }} ({{ session['location'] }})</span>
-        </div>
-
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ category }}">{{ message }}</div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
-
-        <div id="toastContainer" class="toast-container"></div>
-
-        <div class="scanner-card">
+    {% if not so %}
+    <div class="tc52-layout" style="justify-content: center; align-items: center; background: #f7fafc;">
+        <div style="width: 100%; max-width: 320px; padding: 20px; text-align: center;">
+            <div style="font-size: 40px; margin-bottom: 10px;">🏭</div>
+            <h2 style="color: #2d3748; margin: 0 0 20px 0;">TWG PICKING</h2>
             
-            {% if not so %}
-            <div style="text-align:center; padding: 40px 20px;">
-                <div class="icon-circle bg-blue" style="margin: 0 auto 20px auto;">📑</div>
-                <h3 style="color: #4a5568;">Scan Sales Order</h3>
-                
-                <form id="soForm" method="GET" action="/picking" style="margin-top: 25px;">
-                    <div class="input-wrapper">
-                        <input type="text" name="so" class="scan-input" id="soInput" placeholder="Scan SO Here..." autocomplete="off" autofocus>
-                        <button type="button" class="btn-keyboard" onclick="toggleKeyboard('soInput')" title="Toggle Keyboard">⌨</button>
-                    </div>
-                    <div id="focusMsg" class="scan-status-msg">Ready to Scan</div>
-                </form>
+            <form id="soForm" method="GET" action="/picking">
+                <div class="input-wrapper" style="margin-bottom: 20px;">
+                    <input type="text" name="so" id="soInput" class="scan-input" 
+                           style="height: 50px; font-size: 20px; text-align: center;" 
+                           placeholder="Scan Order..." autocomplete="off" autofocus>
+                    <button type="button" class="btn-keyboard" style="height: 50px; width: 50px;" onclick="toggleKeyboard('soInput')">⌨</button>
+                </div>
+            </form>
+            
+            <a href="/dashboard" class="btn-footer btn-exit" 
+               style="text-decoration:none; display: inline-flex; width: auto; padding: 0 40px;">
+               Cancel
+            </a>
+        </div>
+    </div>
+
+    {% else %}
+    <div class="tc52-layout">
+
+        <div class="tc52-header">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-weight:800; color:#e53e3e; font-size: 16px;">TWG WMS</span>
+                <span style="font-size:11px; color:#4a5568;">{{ session['user_id'] }} ({{ session['location'] }})</span>
             </div>
             
-            {% else %}
-            <div class="so-header">
-                <div>
-                    <span style="font-size:12px; color:#718096; text-transform:uppercase; letter-spacing:1px;">Sales Order</span><br>
-                    <strong style="font-size:24px; color:#2d3748;">#{{ so }}</strong>
+            <div style="display: flex; align-items: center; margin-top: 6px; background: #edf2f7; padding: 4px; border-radius: 4px;">
+                <span style="font-weight:bold; font-size: 13px; color: #2d3748; margin-right: 8px;">ORDER:</span>
+                <strong style="font-size: 16px; color: #2b6cb0; flex: 1;">{{ so }}</strong>
+                <a href="/picking" style="font-size:11px; color:#e53e3e; text-transform: uppercase; text-decoration: none; border: 1px solid #e53e3e; padding: 2px 6px; border-radius: 3px;">Change</a>
+            </div>
+        </div>
+
+        <div class="tc52-grid">
+            <table class="pick-table" id="pickingTable">
+                <thead>
+                    <tr>
+                        <th width="12%">Ln</th>
+                        <th width="48%">Item</th>
+                        <th width="20%" class="text-center">Need</th>
+                        <th width="20%" class="text-center">Pick</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                    <tr onclick="selectRow(this, '{{ item.item }}', {{ item.remaining }}, {{ item.tranlineno }})" 
+                        class="item-row" id="row-{{ item.tranlineno }}">
+                        <td style="color:#718096;">{{ item.tranlineno }}</td>
+                        <td style="font-weight:bold; color:#2b6cb0;">{{ item.item }}</td>
+                        <td class="text-center">{{ item.remaining|int }}</td>
+                        <td class="text-center picked-cell" data-line="{{ item.tranlineno }}">0</td> 
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="4" style="text-align:center; padding:30px; color:#38a169; font-weight:bold;">✅ Order Complete</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="tc52-controls" id="scanForm">
+            
+            <div class="control-row" style="justify-content: space-between;">
+                <button id="btnViewBins" class="btn-small-action" onclick="openBinModal()" style="background:#4a5568;">🔍 Bins</button>
+                <div style="display:flex;">
+                    <label class="mode-label"><input type="radio" name="pickMode" value="auto" checked onchange="updateMode()"> Auto</label>
+                    <label class="mode-label"><input type="radio" name="pickMode" value="manual" onchange="updateMode()"> Manual</label>
                 </div>
-                <a href="/picking" class="change-so">Change</a>
             </div>
 
-            <div id="scanForm" class="scan-area">
-                <div class="mode-selector">
-                    <label class="mode-option"><input type="radio" name="pickMode" value="auto" checked onchange="updateMode()"><span>⚡ AUTO</span></label>
-                    <label class="mode-option"><input type="radio" name="pickMode" value="manual" onchange="updateMode()"><span>⌨ MANUAL</span></label>
-                </div>
-                <div class="form-group">
-                    <label>Bin Location</label>
-                    <div class="input-wrapper">
-                        <input type="text" id="binInput" class="scan-input" placeholder="Scan BIN..." autocomplete="off">
-                        <button type="button" class="btn-keyboard" onclick="toggleKeyboard('binInput')">⌨</button>
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>Item / UPC</label>
-                    <div class="input-wrapper">
-                        <input type="text" id="itemInput" class="scan-input" placeholder="Scan ITEM..." autocomplete="off">
-                        <button type="button" class="btn-keyboard" onclick="toggleKeyboard('itemInput')">⌨</button>
-                    </div>
-                </div>
-                <div class="qty-area">
-                    <div style="flex: 2;">
-                        <label style="font-size: 14px; font-weight:bold; color:#4a5568; display:block; margin-bottom:5px;">SESSION QTY</label>
-                        <div class="qty-control-group">
-                            <button class="btn-qty-adjust" id="btnMinus" onclick="adjustQty(-1)">➖</button>
-                            <input type="number" id="qtyInput" class="scan-input qty-input-manual" value="0" inputmode="decimal">
-                            <button class="btn-qty-adjust" id="btnPlus" onclick="adjustQty(1)">➕</button>
-                        </div>
-                    </div>
-                    <div style="flex: 1;" id="addBtnContainer">
-                        <button onclick="addToSession()" class="btn-pick" style="height: 70px; font-size: 20px; width:100%;">ADD</button>
-                    </div>
+            <div class="control-row">
+                <span class="control-label">Scan Bin</span>
+                <div class="input-wrapper">
+                    <input type="text" id="binInput" class="scan-input" placeholder="Scan..." autocomplete="off">
+                    <button type="button" class="btn-keyboard" onclick="toggleKeyboard('binInput')">⌨</button>
                 </div>
             </div>
 
-            <div class="table-responsive" style="max-height: 250px; overflow-y: auto; border-bottom: 2px solid #ddd;">
-                <table class="pick-table" id="pickingTable">
-                    <thead><tr><th width="15%">Ln</th><th width="45%">Item</th><th width="20%">Need</th><th width="20%">Pick</th></tr></thead>
-                    <tbody>
-                        {% for item in items %}
-                        <tr onclick="selectRow(this, '{{ item.item }}', {{ item.remaining }}, {{ item.tranlineno }})" class="item-row" id="row-{{ item.tranlineno }}">
-                            <td style="color:#718096;">{{ item.tranlineno }}</td>
-                            <td style="font-weight:bold; color:#2b6cb0;">{{ item.item }}</td>
-                            <td style="text-align:center;">{{ item.remaining|int }}</td>
-                            <td style="text-align:center;" class="picked-cell" data-line="{{ item.tranlineno }}">0</td> 
-                        </tr>
-                        {% else %}
-                        <tr><td colspan="4" style="text-align:center; padding:30px; color:#38a169;"><strong>All Lines Picked!</strong></td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+            <div class="control-row">
+                <span class="control-label">Scan Item</span>
+                <div class="input-wrapper">
+                    <input type="text" id="itemInput" class="scan-input" placeholder="Scan..." autocomplete="off">
+                    <button type="button" class="btn-keyboard" onclick="toggleKeyboard('itemInput')">⌨</button>
+                </div>
             </div>
 
-            <div id="binButtonArea" style="display:none; margin-top:15px;">
-                <button class="btn-secondary" id="btnViewBins" onclick="openBinModal()">🔍 View Bins</button>
+            <div class="control-row">
+                <span class="control-label">Pick Qty</span>
+                <div class="input-wrapper">
+                    <button id="btnMinus" class="btn-keyboard d-none" onclick="adjustQty(-1)" style="width:34px;">➖</button>
+                    <input type="number" id="qtyInput" class="scan-input text-center" value="0" style="font-weight:bold;" readonly>
+                    <button id="btnPlus" class="btn-keyboard d-none" onclick="adjustQty(1)" style="width:34px;">➕</button>
+                    <button id="addBtnContainer" class="btn-small-action d-none" onclick="addToSession()" style="background:#38a169; height:34px; margin-left:4px;">ADD</button>
+                </div>
             </div>
 
-            <hr style="border: 0; border-top: 2px dashed #e2e8f0; margin: 25px 0;">
-
-            <div style="display: flex; gap: 10px;">
-                <button class="btn-action" style="background:#718096; flex:1;" onclick="openReviewModal()">📋 Scanned (<span id="scanCount">0</span>)</button>
-                <button id="btnSubmit" class="btn-action" style="background:#38a169; flex:1;" onclick="submitFinal()">🚀 Submit</button>
+            <div class="btn-footer-group">
+                <a href="/dashboard" class="btn-footer btn-exit" style="text-decoration:none;">Exit</a>
+                <button class="btn-footer btn-view" onclick="openReviewModal()">View <span id="scanCount">(0)</span></button>
+                <button id="btnSubmit" class="btn-footer btn-submit" onclick="submitFinal()">Submit</button>
             </div>
-            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    <div id="toastContainer" style="position:fixed; top:40px; left:10%; width:80%; z-index:9999; text-align:center;"></div>
+
+    <div id="binModal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span>Available Bins</span>
+                <span onclick="closeModal('binModal')" style="font-size:20px; cursor:pointer;">&times;</span>
+            </div>
+            <div class="modal-body" id="binList"></div>
         </div>
     </div>
 
-    <div id="debugConsole"><div class="log-line">--- DEBUG LOG STARTED ---</div><div class="log-line">System Online.</div></div>
-
-    <div id="binModal" class="modal-overlay" style="display:none;">
+    <div id="reviewModal" class="modal-overlay">
         <div class="modal-content">
-            <div class="modal-header"><h3>Available Bins</h3><span class="close-btn" onclick="closeModal('binModal')">&times;</span></div>
-            <div class="modal-body"><div id="binList" class="bin-list"></div></div>
-            <div class="modal-footer"><button onclick="closeModal('binModal')" class="btn-cancel">Close</button></div>
-        </div>
-    </div>
-    <div id="reviewModal" class="modal-overlay" style="display:none;">
-        <div class="modal-content">
-            <div class="modal-header"><h3>Session Review</h3><span class="close-btn" onclick="closeModal('reviewModal')">&times;</span></div>
-            <div class="modal-body" style="padding:0; overflow-y:auto; max-height:400px;">
-                <table class="pick-table" style="width:100%;">
-                    <thead style="background:#f7fafc;"><tr><th style="padding:10px;">Item</th><th>Bin</th><th>Qty</th><th>Act</th></tr></thead>
+            <div class="modal-header">
+                <span>Scanned Items</span>
+                <span onclick="closeModal('reviewModal')" style="font-size:20px; cursor:pointer;">&times;</span>
+            </div>
+            <div class="modal-body">
+                <table class="pick-table">
+                    <thead style="background:#f7fafc;"><tr><th>Item</th><th>Bin</th><th>Qty</th><th></th></tr></thead>
                     <tbody id="reviewList"></tbody>
                 </table>
-                <div id="emptyReview" style="padding:30px; text-align:center; color:#718096;">📦<br><br>No items yet.</div>
+                <div id="emptyReview" class="text-center" style="padding:20px; color:#a0aec0;">No items scanned.</div>
             </div>
             <div class="modal-footer">
-                <button onclick="clearSession()" class="btn-cancel" style="color:red; float:left;">Clear All</button>
-                <button onclick="closeModal('reviewModal')" class="btn-cancel">Back</button>
+                <button onclick="clearSession()" class="btn-small-action" style="background:#e53e3e;">Clear All</button>
             </div>
         </div>
     </div>
 
+    <div id="debugConsole"></div>
+
     <script>
-        // --- UNIVERSAL FULLSCREEN TRIGGER ---
+        // --- UNIVERSAL FULLSCREEN ---
         function forceFullscreen() {
-            const doc = window.document;
-            const docEl = doc.documentElement;
+            const doc = window.document; const docEl = doc.documentElement;
             const requestFullScreen = docEl.requestFullscreen || docEl.mozRequestFullScreen || docEl.webkitRequestFullScreen || docEl.msRequestFullscreen;
             if(!doc.fullscreenElement && !doc.mozFullScreenElement && !doc.webkitFullscreenElement && !doc.msFullscreenElement) {
                 if(requestFullScreen) requestFullScreen.call(docEl).catch(e=>{});
@@ -175,12 +174,12 @@
         document.addEventListener('click', forceFullscreen, {once:true});
         document.addEventListener('touchstart', forceFullscreen, {once:true});
 
-        // --- DEBUG LOGGING ---
+        // --- DEBUG ---
         function log(msg) {
             const c = document.getElementById('debugConsole');
             const d = document.createElement('div');
             const time = new Date().toLocaleTimeString().split(' ')[0];
-            d.className = 'log-line'; d.innerText = `[${time}] ${msg}`; c.prepend(d); console.log(msg);
+            d.innerText = `[${time}] ${msg}`; c.prepend(d); console.log(msg);
         }
         function toggleDebug() {
             const c = document.getElementById('debugConsole');
@@ -194,7 +193,7 @@
         let currentBinMaxQty = 999999, currentOrderMaxQty = 999999, currentBin = ""; 
         let isAutoMode = true, isSubmitting = false;
 
-        // --- AUDIO SYSTEM ---
+        // --- AUDIO ---
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         let audioUnlocked = false;
         function unlockAudio() { if (!audioUnlocked && audioCtx.state === 'suspended') { audioCtx.resume().then(() => { audioUnlocked = true; }); } }
@@ -228,7 +227,7 @@
             else { bar.classList.replace('status-online', 'status-offline'); txt.innerText = '🚫 OFFLINE'; }
         }
 
-        // --- SCANNER LOGIC (DEBOUNCE + ENTER) ---
+        // --- SCANNER INPUTS ---
         function attachScannerListeners() {
             const inputs = document.querySelectorAll('input.scan-input');
             inputs.forEach(el => {
@@ -259,18 +258,17 @@
             else { el.inputMode = 'none'; log(`${inputId} Keyboard: OFF`); el.blur(); }
         }
 
-        // --- LOCAL STORAGE & DATA ---
+        // --- STORAGE & LOGIC ---
         function saveToLocal() {
             if(!SO_NUMBER) return;
             if (!localStorage.getItem(`twg_batch_id_${SO_NUMBER}`)) localStorage.setItem(`twg_batch_id_${SO_NUMBER}`, crypto.randomUUID());
             localStorage.setItem(`twg_picks_${SO_NUMBER}`, JSON.stringify(sessionPicks));
             const p = document.getElementById('pendingCount');
-            p.style.display = sessionPicks.length ? 'inline-block' : 'none'; p.innerText = `${sessionPicks.length} Pending`;
+            p.style.display = sessionPicks.length ? 'inline-block' : 'none'; p.innerText = `${sessionPicks.length}`;
         }
         function loadFromLocal() { const s = localStorage.getItem(`twg_picks_${SO_NUMBER}`); if(s) try { sessionPicks = JSON.parse(s); } catch(e){} }
         function clearLocal() { localStorage.removeItem(`twg_picks_${SO_NUMBER}`); localStorage.removeItem(`twg_batch_id_${SO_NUMBER}`); sessionPicks = []; updateSessionDisplay(); saveToLocal(); }
 
-        // --- MODES & SELECTION ---
         function updateMode() {
             isAutoMode = document.querySelector('input[name="pickMode"]:checked').value === 'auto';
             const qtyInput = document.getElementById('qtyInput');
@@ -278,12 +276,12 @@
             const itemIn = document.getElementById('itemInput');
             
             if (isAutoMode) {
-                qtyInput.readOnly = true; qtyInput.classList.add('qty-input-auto'); qtyInput.classList.remove('qty-input-manual');
+                qtyInput.readOnly = true; 
                 document.getElementById('btnMinus').classList.add('d-none'); document.getElementById('btnPlus').classList.add('d-none'); document.getElementById('addBtnContainer').classList.add('d-none');
                 if(binIn) binIn.inputMode = 'none'; if(itemIn) itemIn.inputMode = 'none';
                 if(currentBin && itemIn) setTimeout(() => itemIn.focus(), 100);
             } else {
-                qtyInput.readOnly = false; qtyInput.classList.add('qty-input-manual'); qtyInput.classList.remove('qty-input-auto');
+                qtyInput.readOnly = false; 
                 document.getElementById('btnMinus').classList.remove('d-none'); document.getElementById('btnPlus').classList.remove('d-none'); document.getElementById('addBtnContainer').classList.remove('d-none');
                 if(binIn) binIn.inputMode = 'text'; if(itemIn) itemIn.inputMode = 'text';
             }
@@ -293,7 +291,7 @@
             document.querySelectorAll('.item-row').forEach(r => r.classList.remove('active-row'));
             row.classList.add('active-row');
             selectedItemCode = itemCode; selectedLineNo = lineNo; currentOrderMaxQty = remainingQty;
-            document.getElementById('binButtonArea').style.display = 'block';
+            
             document.getElementById('binInput').value = ''; document.getElementById('itemInput').value = '';
             updateSessionDisplay();
             currentBinMaxQty = 999999; 
@@ -301,7 +299,6 @@
             prefetchBins(itemCode);
         }
 
-        // --- VALIDATION & ADD ---
         function validateBin() {
             const binVal = document.getElementById('binInput').value.trim();
             if(!binVal || !selectedItemCode) return;
@@ -370,16 +367,20 @@
 
         // --- HELPERS ---
         function updateSessionDisplay() {
-            document.getElementById('scanCount').innerText = sessionPicks.length;
+            const btnView = document.getElementById('scanCount');
+            if(btnView) btnView.innerText = `(${sessionPicks.length})`;
+            
             document.querySelectorAll('.picked-cell').forEach(c => c.innerText = "0");
             sessionPicks.forEach(p => { const c = document.querySelector(`.picked-cell[data-line="${p.lineNo}"]`); if(c) c.innerText = parseFloat(c.innerText||0) + p.qty; });
             if(selectedLineNo) { const t = sessionPicks.filter(p=>p.lineNo===selectedLineNo).reduce((s,p)=>s+p.qty,0); document.getElementById('qtyInput').value = t; }
         }
         function adjustQty(n) { if(!isAutoMode) { const i=document.getElementById('qtyInput'); i.value=Math.max(0, (parseFloat(i.value)||0)+n); } }
         function showToast(m,t='info'){ 
-            const c=document.getElementById('toastContainer'); const d=document.createElement('div'); d.className=`toast toast-${t}`; d.innerText=m; c.appendChild(d);
+            const c=document.getElementById('toastContainer'); const d=document.createElement('div'); 
+            d.style.cssText = `background:${t=='error'?'#e53e3e':'#38a169'}; color:white; padding:10px 20px; border-radius:4px; margin-bottom:10px; box-shadow:0 4px 6px rgba(0,0,0,0.1); font-weight:bold; font-size:14px;`;
+            d.innerText=m; c.appendChild(d);
             playBeep(t==='error'?'error':'success');
-            setTimeout(()=>{ d.style.opacity='0'; setTimeout(()=>d.remove(),300); }, 3000);
+            setTimeout(()=>{ d.style.opacity='0'; setTimeout(()=>d.remove(),300); }, 2000);
         }
         function openBinModal(){
             if(document.activeElement) document.activeElement.blur();
@@ -389,16 +390,21 @@
         }
         async function prefetchBins(item) {
             if(binCache[item]) return;
-            const l=document.getElementById('binList'); l.innerHTML='Loading...';
+            const l=document.getElementById('binList'); l.innerHTML='<div class="text-center" style="padding:20px;">Loading...</div>';
             try { const r=await fetch('/get_item_bins', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({item})}); const d=await r.json(); if(d.status==='success') { binCache[item]=d.bins; populateBinList(d.bins); } else l.innerText=d.msg; } catch(e) { l.innerText='Connection Failed'; }
         }
         function populateBinList(bins) {
-            const l=document.getElementById('binList'); l.innerHTML=''; if(!bins.length) { l.innerHTML='No Stock'; return; }
-            bins.forEach(b=>{ const d=document.createElement('div'); d.className='bin-row'; d.innerHTML=`<span class="bin-name">${b.bin}</span><span class="bin-qty">Qty: ${b.qty}</span>`; l.appendChild(d); });
+            const l=document.getElementById('binList'); l.innerHTML=''; if(!bins.length) { l.innerHTML='<div class="text-center" style="padding:20px;">No Stock</div>'; return; }
+            bins.forEach(b=>{ 
+                const d=document.createElement('div'); 
+                d.style.cssText = "display:flex; justify-content:space-between; padding:15px; border-bottom:1px solid #eee; font-size:16px;";
+                d.innerHTML=`<span style="font-weight:bold; color:#2b6cb0;">${b.bin}</span><span>Qty: ${b.qty}</span>`; 
+                l.appendChild(d); 
+            });
         }
         function openReviewModal(){
             const l=document.getElementById('reviewList'); l.innerHTML='';
-            sessionPicks.forEach((p,i)=>{ l.innerHTML+=`<tr><td>${p.item}</td><td>${p.bin}</td><td>${p.qty}</td><td><button class="btn-sm btn-danger" onclick="removePick(${i})">🗑</button></td></tr>`; });
+            sessionPicks.forEach((p,i)=>{ l.innerHTML+=`<tr><td>${p.item}</td><td>${p.bin}</td><td>${p.qty}</td><td><button class="btn-small-action" style="background:#e53e3e; padding: 2px 8px;" onclick="removePick(${i})">X</button></td></tr>`; });
             document.getElementById('emptyReview').style.display = sessionPicks.length?'none':'block'; document.getElementById('reviewModal').style.display='flex';
         }
         function removePick(i){ if(confirm("Delete?")){ sessionPicks.splice(i,1); saveToLocal(); openReviewModal(); updateSessionDisplay(); } }
