@@ -1,13 +1,19 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#3182ce">
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+    
     <title>TWG Warehouse</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    
     <style>
         body { background-color: #f0f2f5; font-family: sans-serif; }
         .login-container { 
-            max-width: 350px; margin: 60px auto; padding: 20px; 
+            max-width: 350px; margin: 40px auto; padding: 20px; 
             background: white; border-radius: 10px; 
             box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
         }
@@ -20,9 +26,17 @@
         }
         .alert { padding: 10px; margin-bottom: 15px; border-radius: 5px; }
         .alert-error { background: #ffebee; color: #c62828; }
+        
+        /* Fullscreen Helper */
+        #fs-btn {
+            position: fixed; bottom: 10px; right: 10px; opacity: 0.3;
+            background: #000; color: #fff; border: none; padding: 5px; font-size: 10px;
+        }
     </style>
 </head>
 <body>
+    <button id="fs-btn" onclick="forceFullscreen()">⛶</button>
+
     <div class="login-container">
         <h2 style="text-align: center; color: #333;">🏭 TWG Scanner</h2>
         
@@ -38,8 +52,8 @@
             <div class="form-group">
                 <label>User ID</label>
                 <input type="text" name="userid" id="userInput" class="scan-input" 
-                       placeholder="Scan Badge (Tap to Type)..." 
-                       autofocus required autocomplete="off" inputmode="none">
+                       placeholder="Scan Badge..." 
+                       autofocus required autocomplete="off">
             </div>
             
             <div class="form-group">
@@ -49,17 +63,33 @@
 
             <button type="submit" class="btn-login">LOGIN</button>
         </form>
+        <div style="text-align:center; font-size:11px; color:#aaa; margin-top:20px;">
+            v1.3 - Tap screen to Fullscreen
+        </div>
     </div>
 
     <script>
+        // --- UNIVERSAL FULLSCREEN TRIGGER ---
+        function forceFullscreen() {
+            const doc = window.document;
+            const docEl = doc.documentElement;
+            const requestFullScreen = docEl.requestFullscreen || docEl.mozRequestFullScreen || docEl.webkitRequestFullScreen || docEl.msRequestFullscreen;
+            if(!doc.fullscreenElement && !doc.mozFullScreenElement && !doc.webkitFullscreenElement && !doc.msFullscreenElement) {
+                if(requestFullScreen) requestFullScreen.call(docEl).catch(e=>{});
+            }
+        }
+        // Attempt on any touch/click
+        document.addEventListener('click', forceFullscreen, {once:true});
+        document.addEventListener('touchstart', forceFullscreen, {once:true});
+        
+        // Initial Focus Logic
         document.addEventListener('DOMContentLoaded', () => {
             const userInput = document.getElementById('userInput');
             if(userInput) {
+                setTimeout(() => userInput.focus(), 500);
                 userInput.addEventListener('click', function() {
                     if (this.inputMode === 'none') {
-                        this.inputMode = 'text'; // Badge might have letters? Safe default.
-                        this.blur(); 
-                        setTimeout(() => this.focus(), 50); 
+                        this.inputMode = 'text'; this.blur(); setTimeout(() => this.focus(), 50); 
                     }
                 });
             }

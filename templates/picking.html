@@ -2,189 +2,190 @@
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="mobile-web-app-capable" content="yes">
     <title>Picking - {{ so }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        /* Embedded CSS to handle specific alignments */
+        .mode-label { font-size: 12px; font-weight: bold; margin-right: 8px; display: flex; align-items: center; }
+        .mode-label input { margin-right: 4px; transform: scale(1.2); }
+        #debugConsole { display: none; position: fixed; top: 25px; left: 0; right:0; height: 100px; background: rgba(0,0,0,0.8); color: lime; z-index: 9999; overflow-y: scroll; font-size: 10px; padding: 5px;}
+    </style>
 </head>
-<body style="padding-top: 40px;"> 
+<body>
     
     <div id="statusBar" class="status-bar status-online">
-        <span id="statusText"><i class="fas fa-wifi"></i> SYSTEM ONLINE</span>
-        <span id="pendingCount" style="display:none; margin-left:10px; background:rgba(0,0,0,0.2); padding:2px 6px; border-radius:4px; font-size:11px;">
-            0 Pending
-        </span>
+        <span id="statusText">📶 ONLINE</span>
+        <span id="pendingCount" style="display:none; background:#4a5568; padding:0 4px; border-radius:2px;">0</span>
+        <button onclick="toggleDebug()" style="background:none; border:none; color:white; font-size:12px;">🐞</button>
     </div>
 
-    <div class="container" style="max-width: 600px; margin-bottom: 60px;">
-        
-        <div class="nav-header">
-            <a href="/dashboard" class="back-btn"><i class="fas fa-chevron-left"></i> Home</a>
-            <span class="user-info">{{ session['user_id'] }} ({{ session['location'] }})</span>
-        </div>
-
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ category }}">{{ message }}</div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
-
-        <div id="toastContainer" class="toast-container"></div>
-
-        <div class="scanner-card">
+    {% if not so %}
+    <div class="tc52-layout" style="justify-content: center; align-items: center; background: #f7fafc;">
+        <div style="width: 100%; max-width: 320px; padding: 20px; text-align: center;">
+            <div style="font-size: 40px; margin-bottom: 10px;">🏭</div>
+            <h2 style="color: #2d3748; margin: 0 0 20px 0;">TWG PICKING</h2>
             
-            {% if not so %}
-            <div style="text-align:center; padding: 40px 20px;">
-                <div class="icon-circle bg-blue" style="margin: 0 auto 20px auto;">
-                    <i class="fas fa-barcode"></i>
+            <form id="soForm" method="GET" action="/picking">
+                <div class="input-wrapper" style="margin-bottom: 20px;">
+                    <input type="text" name="so" id="soInput" class="scan-input" 
+                           style="height: 50px; font-size: 20px; text-align: center;" 
+                           placeholder="Scan Order..." autocomplete="off" autofocus>
+                    <button type="button" class="btn-keyboard" style="height: 50px; width: 50px;" onclick="toggleKeyboard('soInput')">⌨</button>
                 </div>
-                <h3 style="color: #4a5568;">Scan Sales Order</h3>
-                <form method="GET" action="/picking" style="margin-top: 20px;">
-                    <input type="text" name="so" class="scan-input" id="soInput" 
-                           placeholder="Scan SO (Tap to Type)..." 
-                           autofocus autocomplete="off" inputmode="none">
-                </form>
+            </form>
+            
+            <a href="/dashboard" class="btn-footer btn-exit" 
+               style="text-decoration:none; display: inline-flex; width: auto; padding: 0 40px;">
+               Cancel
+            </a>
+        </div>
+    </div>
+
+    {% else %}
+    <div class="tc52-layout">
+
+        <div class="tc52-header">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-weight:800; color:#e53e3e; font-size: 16px;">TWG WMS</span>
+                <span style="font-size:11px; color:#4a5568;">{{ session['user_id'] }} ({{ session['location'] }})</span>
             </div>
             
-            {% else %}
-            <div class="so-header">
-                <div>
-                    <span style="font-size:12px; color:#718096; text-transform:uppercase; letter-spacing:1px;">Sales Order</span><br>
-                    <strong style="font-size:24px; color:#2d3748;">#{{ so }}</strong>
-                </div>
-                <a href="/picking" class="change-so">Change</a>
+            <div style="display: flex; align-items: center; margin-top: 6px; background: #edf2f7; padding: 4px; border-radius: 4px;">
+                <span style="font-weight:bold; font-size: 13px; color: #2d3748; margin-right: 8px;">ORDER:</span>
+                <strong style="font-size: 16px; color: #2b6cb0; flex: 1;">{{ so }}</strong>
+                <a href="/picking" style="font-size:11px; color:#e53e3e; text-transform: uppercase; text-decoration: none; border: 1px solid #e53e3e; padding: 2px 6px; border-radius: 3px;">Change</a>
             </div>
+        </div>
 
-            <div id="scanForm" class="scan-area">
-                
-                <div class="mode-selector">
-                    <label class="mode-option">
-                        <input type="radio" name="pickMode" value="auto" checked onchange="updateMode()">
-                        <span><i class="fas fa-bolt"></i> AUTO</span>
-                    </label>
-                    <label class="mode-option">
-                        <input type="radio" name="pickMode" value="manual" onchange="updateMode()">
-                        <span><i class="fas fa-keyboard"></i> MANUAL</span>
-                    </label>
-                </div>
+        <div class="tc52-grid">
+            <table class="pick-table" id="pickingTable">
+                <thead>
+                    <tr>
+                        <th width="12%">Ln</th>
+                        <th width="48%">Item</th>
+                        <th width="20%" class="text-center">Need</th>
+                        <th width="20%" class="text-center">Pick</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                    <tr onclick="selectRow(this, '{{ item.item }}', {{ item.remaining }}, {{ item.tranlineno }})" 
+                        class="item-row" id="row-{{ item.tranlineno }}">
+                        <td style="color:#718096;">{{ item.tranlineno }}</td>
+                        <td style="font-weight:bold; color:#2b6cb0;">{{ item.item }}</td>
+                        <td class="text-center">{{ item.remaining|int }}</td>
+                        <td class="text-center picked-cell" data-line="{{ item.tranlineno }}">0</td> 
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="4" style="text-align:center; padding:30px; color:#38a169; font-weight:bold;">✅ Order Complete</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
 
-                <div class="form-group">
-                    <label>Bin Location</label>
-                    <input type="text" id="binInput" class="scan-input" placeholder="Scan BIN..." autocomplete="off" inputmode="none">
-                </div>
-                <div class="form-group">
-                    <label>Item / UPC</label>
-                    <input type="text" id="itemInput" class="scan-input" placeholder="Scan ITEM..." autocomplete="off" inputmode="none">
-                </div>
-                
-                <div class="qty-area">
-                    <div style="flex: 2;">
-                        <label style="font-size: 14px; font-weight:bold; color:#4a5568; display:block; margin-bottom:5px;">
-                            SESSION QTY
-                        </label>
-                        
-                        <div class="qty-control-group">
-                            <button class="btn-qty-adjust" id="btnMinus" onclick="adjustQty(-1)"><i class="fas fa-minus"></i></button>
-                            <input type="number" id="qtyInput" class="scan-input qty-input-manual" value="0" inputmode="decimal">
-                            <button class="btn-qty-adjust" id="btnPlus" onclick="adjustQty(1)"><i class="fas fa-plus"></i></button>
-                        </div>
-                    </div>
-
-                    <div style="flex: 1;" id="addBtnContainer">
-                        <button onclick="addToSession()" class="btn-pick" style="height: 70px; font-size: 20px; width:100%;">ADD</button>
-                    </div>
+        <form class="tc52-controls" id="scanForm" onsubmit="return false;">
+            
+            <div class="control-row" style="justify-content: space-between;">
+                <button type="button" id="btnViewBins" class="btn-small-action" onclick="openBinModal()" style="background:#4a5568;">🔍 Bins</button>
+                <div style="display:flex;">
+                    <label class="mode-label"><input type="radio" name="pickMode" value="auto" checked onchange="updateMode()"> Auto</label>
+                    <label class="mode-label"><input type="radio" name="pickMode" value="manual" onchange="updateMode()"> Manual</label>
                 </div>
             </div>
 
-            <div class="table-responsive" style="max-height: 250px; overflow-y: auto; border-bottom: 2px solid #ddd;">
-                <table class="pick-table" id="pickingTable">
-                    <thead>
-                        <tr>
-                            <th width="15%">Ln</th>
-                            <th width="45%">Item</th>
-                            <th width="20%">Need</th>
-                            <th width="20%">Pick</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for item in items %}
-                        <tr onclick="selectRow(this, '{{ item.item }}', {{ item.remaining }}, {{ item.tranlineno }})" 
-                            class="item-row" 
-                            id="row-{{ item.tranlineno }}">
-                            <td style="color:#718096;">{{ item.tranlineno }}</td>
-                            <td style="font-weight:bold; color:#2b6cb0;">{{ item.item }}</td>
-                            <td style="text-align:center;">{{ item.remaining|int }}</td>
-                            <td style="text-align:center;" class="picked-cell" data-line="{{ item.tranlineno }}">0</td> 
-                        </tr>
-                        {% else %}
-                        <tr>
-                            <td colspan="4" style="text-align:center; padding:30px; color:#38a169;">
-                                <strong>All Lines Picked!</strong>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+            <div class="control-row">
+                <span class="control-label">Scan Bin</span>
+                <div class="input-wrapper">
+                    <input type="text" name="bin" id="binInput" class="scan-input" placeholder="Scan..." autocomplete="off">
+                    <button type="button" class="btn-keyboard" onclick="toggleKeyboard('binInput')">⌨</button>
+                </div>
             </div>
 
-            <div id="binButtonArea" style="display:none; margin-top:15px;">
-                <button class="btn-secondary" id="btnViewBins" onclick="openBinModal()">
-                    <i class="fas fa-search"></i> View Bins
-                </button>
+            <div class="control-row">
+                <span class="control-label">Scan Item</span>
+                <div class="input-wrapper">
+                    <input type="text" name="item" id="itemInput" class="scan-input" placeholder="Scan..." autocomplete="off">
+                    <button type="button" class="btn-keyboard" onclick="toggleKeyboard('itemInput')">⌨</button>
+                </div>
             </div>
 
-            <hr style="border: 0; border-top: 2px dashed #e2e8f0; margin: 25px 0;">
-
-            <div style="display: flex; gap: 10px;">
-                <button class="btn-action" style="background:#718096; flex:1;" onclick="openReviewModal()">
-                    <i class="fas fa-list"></i> Scanned (<span id="scanCount">0</span>)
-                </button>
-                <button id="btnSubmit" class="btn-action" style="background:#38a169; flex:1;" onclick="submitFinal()">
-                    <i class="fas fa-paper-plane"></i> Submit
-                </button>
+            <div class="control-row">
+                <span class="control-label">Pick Qty</span>
+                <div class="input-wrapper">
+                    <button type="button" id="btnMinus" class="btn-keyboard d-none" onclick="adjustQty(-1)" style="width:34px;">➖</button>
+                    <input type="number" id="qtyInput" class="scan-input text-center" value="1" style="font-weight:bold;" readonly>
+                    <button type="button" id="btnPlus" class="btn-keyboard d-none" onclick="adjustQty(1)" style="width:34px;">➕</button>
+                    <button type="button" id="addBtnContainer" class="btn-small-action d-none" onclick="addToSession()" style="background:#38a169; height:34px; margin-left:4px;">ADD</button>
+                </div>
             </div>
 
-            {% endif %}
+            <div class="btn-footer-group">
+                <a href="/dashboard" class="btn-footer btn-exit" style="text-decoration:none;">Exit</a>
+                <button type="button" class="btn-footer btn-view" onclick="openReviewModal()">View <span id="scanCount">(0)</span></button>
+                <button type="button" id="btnSubmit" class="btn-footer btn-submit" onclick="submitFinal()">Submit</button>
+            </div>
+        </form>
+    </div>
+    {% endif %}
+
+    <div id="toastContainer" style="position:fixed; top:40px; left:10%; width:80%; z-index:9999; text-align:center;"></div>
+
+    <div id="binModal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span>Available Bins</span>
+                <span onclick="closeModal('binModal')" style="font-size:20px; cursor:pointer;">&times;</span>
+            </div>
+            <div class="modal-body" id="binList"></div>
         </div>
     </div>
 
-    <div id="binModal" class="modal-overlay" style="display:none;">
+    <div id="reviewModal" class="modal-overlay">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Available Bins</h3>
-                <span class="close-btn" onclick="closeModal('binModal')">&times;</span>
+                <span>Scanned Items</span>
+                <span onclick="closeModal('reviewModal')" style="font-size:20px; cursor:pointer;">&times;</span>
             </div>
-            <div class="modal-body"><div id="binList" class="bin-list"></div></div>
-            <div class="modal-footer"><button onclick="closeModal('binModal')" class="btn-cancel">Close</button></div>
-        </div>
-    </div>
-
-    <div id="reviewModal" class="modal-overlay" style="display:none;">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Session Review</h3>
-                <span class="close-btn" onclick="closeModal('reviewModal')">&times;</span>
-            </div>
-            <div class="modal-body" style="padding:0; overflow-y:auto; max-height:400px;">
-                <table class="pick-table" style="width:100%;">
-                    <thead style="background:#f7fafc;">
-                        <tr><th style="padding:10px;">Item</th><th>Bin</th><th>Qty</th><th>Act</th></tr>
-                    </thead>
+            <div class="modal-body">
+                <table class="pick-table">
+                    <thead style="background:#f7fafc;"><tr><th>Item</th><th>Bin</th><th>Qty</th><th></th></tr></thead>
                     <tbody id="reviewList"></tbody>
                 </table>
-                <div id="emptyReview" style="padding:30px; text-align:center; color:#718096;">
-                    <i class="fas fa-box-open fa-2x"></i><br><br>No items yet.
-                </div>
+                <div id="emptyReview" class="text-center" style="padding:20px; color:#a0aec0;">No items scanned.</div>
             </div>
             <div class="modal-footer">
-                <button onclick="clearSession()" class="btn-cancel" style="color:red; float:left;">Clear All</button>
-                <button onclick="closeModal('reviewModal')" class="btn-cancel">Back</button>
+                <button onclick="clearSession()" class="btn-small-action" style="background:#e53e3e;">Clear All</button>
             </div>
         </div>
     </div>
 
+    <div id="debugConsole"></div>
+
     <script>
+        // --- UNIVERSAL FULLSCREEN ---
+        function forceFullscreen() {
+            const doc = window.document; const docEl = doc.documentElement;
+            const requestFullScreen = docEl.requestFullscreen || docEl.mozRequestFullScreen || docEl.webkitRequestFullScreen || docEl.msRequestFullscreen;
+            if(!doc.fullscreenElement && !doc.mozFullScreenElement && !doc.webkitFullscreenElement && !doc.msFullscreenElement) {
+                if(requestFullScreen) requestFullScreen.call(docEl).catch(e=>{});
+            }
+        }
+        document.addEventListener('click', forceFullscreen, {once:true});
+        document.addEventListener('touchstart', forceFullscreen, {once:true});
+
+        // --- DEBUG ---
+        function log(msg) {
+            const c = document.getElementById('debugConsole');
+            const d = document.createElement('div');
+            const time = new Date().toLocaleTimeString().split(' ')[0];
+            d.innerText = `[${time}] ${msg}`; c.prepend(d); console.log(msg);
+        }
+        function toggleDebug() {
+            const c = document.getElementById('debugConsole');
+            c.style.display = (c.style.display === 'none') ? 'block' : 'none';
+        }
+
         // --- VARIABLES ---
         const SO_NUMBER = "{{ so }}";
         let sessionPicks = [], binCache = {};
@@ -192,121 +193,103 @@
         let currentBinMaxQty = 999999, currentOrderMaxQty = 999999, currentBin = ""; 
         let isAutoMode = true, isSubmitting = false;
 
-        // --- AUDIO SYSTEM (Safe Start) ---
-        // Browsers block audio until user interaction. This unlocks it on the first touch.
+        // --- AUDIO ---
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         let audioUnlocked = false;
-
-        function unlockAudio() {
-            if (!audioUnlocked && audioCtx.state === 'suspended') {
-                audioCtx.resume().then(() => { audioUnlocked = true; });
-            }
-        }
+        function unlockAudio() { if (!audioUnlocked && audioCtx.state === 'suspended') { audioCtx.resume().then(() => { audioUnlocked = true; }); } }
         document.body.addEventListener('touchstart', unlockAudio, {once:true});
         document.body.addEventListener('click', unlockAudio, {once:true});
-
         function playBeep(type) {
             if (audioCtx.state === 'suspended') audioCtx.resume();
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
-            osc.connect(gain);
-            gain.connect(audioCtx.destination);
-            
-            if (type === 'success') {
-                osc.frequency.value = 1200; gain.gain.value = 0.1;
-                osc.start(); osc.stop(audioCtx.currentTime + 0.1);
-            } else {
-                osc.frequency.value = 200; gain.gain.value = 0.2; osc.type = 'sawtooth';
-                osc.start(); osc.stop(audioCtx.currentTime + 0.4);
-            }
+            osc.connect(gain); gain.connect(audioCtx.destination);
+            if (type === 'success') { osc.frequency.value = 1200; gain.gain.value = 0.1; osc.start(); osc.stop(audioCtx.currentTime + 0.1); } 
+            else { osc.frequency.value = 200; gain.gain.value = 0.2; osc.type = 'sawtooth'; osc.start(); osc.stop(audioCtx.currentTime + 0.4); }
         }
 
-        // --- SMART INPUT LOGIC (Zebra Optimized) ---
-        // Allows scanning by default (no keyboard). Touching input enables keyboard.
-        document.addEventListener('DOMContentLoaded', () => {
-            const soInput = document.getElementById('soInput');
-            if(soInput) {
-                soInput.addEventListener('click', function() {
-                    // If user touches field, switch to NumPad
-                    if (this.inputMode === 'none') {
-                        this.inputMode = 'decimal'; 
-                        this.blur(); // Blur/Focus cycle forces keyboard to appear
-                        setTimeout(() => this.focus(), 50); 
-                    }
-                });
-            }
-        });
-
-        // --- INITIALIZATION ---
+        // --- INIT ---
         window.onload = function() {
+            log("App Loaded");
             if(SO_NUMBER) { loadFromLocal(); updateSessionDisplay(); updateMode(); }
-            if(document.getElementById('soInput')) document.getElementById('soInput').focus();
             updateStatusUI(navigator.onLine);
+            const soInput = document.getElementById('soInput');
+            if(soInput) setTimeout(() => soInput.focus(), 200);
+            attachScannerListeners();
         };
 
         window.addEventListener('online', () => updateStatusUI(true));
         window.addEventListener('offline', () => updateStatusUI(false));
-
         function updateStatusUI(online) {
             const bar = document.getElementById('statusBar');
             const txt = document.getElementById('statusText');
-            if (online) {
-                bar.classList.replace('status-offline', 'status-online');
-                txt.innerHTML = '<i class="fas fa-wifi"></i> ONLINE';
-            } else {
-                bar.classList.replace('status-online', 'status-offline');
-                txt.innerHTML = '<i class="fas fa-ban"></i> OFFLINE';
-            }
+            if (online) { bar.classList.replace('status-offline', 'status-online'); txt.innerText = '📶 SYSTEM ONLINE'; } 
+            else { bar.classList.replace('status-online', 'status-offline'); txt.innerText = '🚫 OFFLINE'; }
         }
 
-        // --- LOCAL STORAGE ---
+        // --- SCANNER INPUTS ---
+        function attachScannerListeners() {
+            const inputs = document.querySelectorAll('input.scan-input');
+            inputs.forEach(el => {
+                el.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' || e.keyCode === 13) { e.preventDefault(); handleAction(el); }
+                });
+                let debounceTimer;
+                el.addEventListener('input', () => {
+                    clearTimeout(debounceTimer);
+                    debounceTimer = setTimeout(() => {
+                        if (el.value.length > 2) { log(`Auto-Submitting: ${el.id}`); handleAction(el); }
+                    }, 300);
+                });
+            });
+        }
+
+        function handleAction(el) {
+            if (el.value.trim() === "") return;
+            if (el.id === 'soInput') document.getElementById('soForm').submit();
+            else if (el.id === 'binInput') validateBin();
+            else if (el.id === 'itemInput') handleItemScan();
+        }
+
+        function toggleKeyboard(inputId) {
+            const el = document.getElementById(inputId);
+            if (!el) return;
+            if (el.inputMode === 'none') { el.inputMode = 'text'; log(`${inputId} Keyboard: ON`); el.blur(); setTimeout(() => el.focus(), 50); } 
+            else { el.inputMode = 'none'; log(`${inputId} Keyboard: OFF`); el.blur(); }
+        }
+
+        function safeFocus(id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.inputMode = 'none'; // Prevent keyboard popup
+            el.focus();
+            setTimeout(() => { el.inputMode = 'text'; }, 300); 
+        }
+
+        // --- STORAGE & LOGIC ---
         function saveToLocal() {
             if(!SO_NUMBER) return;
             if (!localStorage.getItem(`twg_batch_id_${SO_NUMBER}`)) localStorage.setItem(`twg_batch_id_${SO_NUMBER}`, crypto.randomUUID());
             localStorage.setItem(`twg_picks_${SO_NUMBER}`, JSON.stringify(sessionPicks));
             const p = document.getElementById('pendingCount');
-            p.style.display = sessionPicks.length ? 'inline-block' : 'none';
-            p.innerText = `${sessionPicks.length} Pending`;
+            p.style.display = sessionPicks.length ? 'inline-block' : 'none'; p.innerText = `${sessionPicks.length}`;
         }
-        function loadFromLocal() {
-            const s = localStorage.getItem(`twg_picks_${SO_NUMBER}`);
-            if(s) try { sessionPicks = JSON.parse(s); } catch(e){}
-        }
-        function clearLocal() {
-            localStorage.removeItem(`twg_picks_${SO_NUMBER}`);
-            localStorage.removeItem(`twg_batch_id_${SO_NUMBER}`);
-            sessionPicks = []; updateSessionDisplay(); saveToLocal();
-        }
+        function loadFromLocal() { const s = localStorage.getItem(`twg_picks_${SO_NUMBER}`); if(s) try { sessionPicks = JSON.parse(s); } catch(e){} }
+        function clearLocal() { localStorage.removeItem(`twg_picks_${SO_NUMBER}`); localStorage.removeItem(`twg_batch_id_${SO_NUMBER}`); sessionPicks = []; updateSessionDisplay(); saveToLocal(); }
 
-        // --- UI MODES ---
         function updateMode() {
             isAutoMode = document.querySelector('input[name="pickMode"]:checked').value === 'auto';
             const qtyInput = document.getElementById('qtyInput');
-            const binIn = document.getElementById('binInput');
-            const itemIn = document.getElementById('itemInput');
             
             if (isAutoMode) {
-                // AUTO: Keyboard locked for scanning speed
-                qtyInput.readOnly = true;
-                qtyInput.classList.add('qty-input-auto');
-                qtyInput.classList.remove('qty-input-manual');
-                document.getElementById('btnMinus').classList.add('d-none');
-                document.getElementById('btnPlus').classList.add('d-none');
-                document.getElementById('addBtnContainer').classList.add('d-none');
-                if(binIn) binIn.inputMode = 'none'; 
-                if(itemIn) itemIn.inputMode = 'none';
-                if(currentBin) document.getElementById('itemInput').focus();
+                qtyInput.readOnly = true; 
+                qtyInput.value = 1; // Default to 1 for Auto
+                document.getElementById('btnMinus').classList.add('d-none'); document.getElementById('btnPlus').classList.add('d-none'); document.getElementById('addBtnContainer').classList.add('d-none');
+                if(currentBin) setTimeout(() => safeFocus('itemInput'), 100);
             } else {
-                // MANUAL: Enable editing
-                qtyInput.readOnly = false;
-                qtyInput.classList.add('qty-input-manual');
-                qtyInput.classList.remove('qty-input-auto');
-                document.getElementById('btnMinus').classList.remove('d-none');
-                document.getElementById('btnPlus').classList.remove('d-none');
-                document.getElementById('addBtnContainer').classList.remove('d-none');
-                if(binIn) binIn.inputMode = 'text'; // Allow text in case of weird bin names
-                if(itemIn) itemIn.inputMode = 'text';
-                qtyInput.focus(); qtyInput.select();
+                qtyInput.readOnly = false; 
+                // Don't reset value here, let user see what they are doing
+                document.getElementById('btnMinus').classList.remove('d-none'); document.getElementById('btnPlus').classList.remove('d-none'); document.getElementById('addBtnContainer').classList.remove('d-none');
             }
         }
 
@@ -314,165 +297,242 @@
             document.querySelectorAll('.item-row').forEach(r => r.classList.remove('active-row'));
             row.classList.add('active-row');
             selectedItemCode = itemCode; selectedLineNo = lineNo; currentOrderMaxQty = remainingQty;
-            document.getElementById('binButtonArea').style.display = 'block';
-            document.getElementById('binInput').value = '';
-            document.getElementById('itemInput').value = '';
+            
+            document.getElementById('binInput').value = ''; document.getElementById('itemInput').value = '';
+            
+            // Only update the totals in the table, don't overwrite the input yet
             updateSessionDisplay();
+            
             currentBinMaxQty = 999999; 
-            // Important: We do NOT focus() here to prevent keyboard popup
+            setTimeout(() => { safeFocus('binInput'); }, 100);
             prefetchBins(itemCode);
         }
 
-        // --- SCANNING & VALIDATION ---
         function validateBin() {
             const binVal = document.getElementById('binInput').value.trim();
             if(!binVal || !selectedItemCode) return;
+            log(`Validating Bin: ${binVal}`);
             
-            // Check Cache first
+            // Check cache first
             if (binCache[selectedItemCode]) {
                 const f = binCache[selectedItemCode].find(b => b.bin === binVal);
-                if (f) {
-                    currentBinMaxQty = f.qty; currentBin = binVal;
-                    showToast(`Bin Verified. Max: ${f.qty}`, 'success');
-                    document.getElementById('itemInput').focus(); return;
+                if (f) { 
+                    currentBinMaxQty = f.qty; currentBin = binVal; 
+                    showToast(`Bin Verified. Max: ${f.qty}`, 'success'); 
+                    safeFocus('itemInput'); 
+                    return; 
                 }
             }
+            
             if (!navigator.onLine) { showToast("Offline: Cannot verify.", 'warning'); return; }
-
+            
             fetch('/validate_bin', {
                 method: 'POST', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ bin: binVal, item: selectedItemCode })
             }).then(r=>r.json()).then(d => {
-                if(d.status === 'success') {
-                    currentBinMaxQty = d.onhand; currentBin = binVal;
-                    showToast(`Bin Verified. Max: ${d.onhand}`, 'success');
-                    document.getElementById('itemInput').focus();
-                } else { showToast(d.msg, 'error'); document.getElementById('binInput').value=''; }
+                if(d.status === 'success') { 
+                    currentBinMaxQty = d.onhand; currentBin = binVal; 
+                    showToast(`Bin Verified. Max: ${d.onhand}`, 'success'); 
+                    safeFocus('itemInput'); 
+                }
+                else { showToast(d.msg, 'error'); document.getElementById('binInput').value=''; safeFocus('binInput'); }
             }).catch(()=> showToast("Network Error", 'error'));
         }
 
         function addToSession() {
             if(!selectedItemCode) { showToast("Select item first!", 'warning'); return; }
-            if(document.getElementById('binInput').value.trim() !== currentBin) {
-                showToast("Validate bin first", 'warning'); return;
-            }
+            if(document.getElementById('binInput').value.trim() !== currentBin) { showToast("Validate bin first", 'warning'); return; }
+            
             let qty = isAutoMode ? 1 : (parseFloat(document.getElementById('qtyInput').value)||0);
-            if(qty<=0) return;
+            if(qty <= 0) return;
 
-            // Checks
-            const picked = sessionPicks.filter(p=>p.item===selectedItemCode && p.bin===currentBin).reduce((s,p)=>s+p.qty,0);
-            if(picked+qty > currentBinMaxQty) { showToast(`BIN LIMIT: ${currentBinMaxQty}`, 'error'); return; }
+            // 1. Calculate current totals including what's already in session
+            const currentLineTotal = sessionPicks.filter(p => p.lineNo === selectedLineNo).reduce((s,p) => s + p.qty, 0);
+            const currentBinTotal = sessionPicks.filter(p => p.item === selectedItemCode && p.bin === currentBin).reduce((s,p) => s + p.qty, 0);
 
-            const linePicked = sessionPicks.filter(p=>p.lineNo===selectedLineNo).reduce((s,p)=>s+p.qty,0);
-            if(linePicked+qty > currentOrderMaxQty) { showToast(`ORDER LIMIT Reached`, 'error'); return; }
+            // 2. Limit Checks
+            if(currentBinTotal + qty > currentBinMaxQty) { showToast(`BIN LIMIT EXCEEDED (Max: ${currentBinMaxQty})`, 'error'); return; }
+            if(currentLineTotal + qty > currentOrderMaxQty) { showToast(`ORDER LIMIT EXCEEDED (Need: ${currentOrderMaxQty})`, 'error'); return; }
 
-            // Add
-            sessionPicks.push({ id:Date.now(), lineNo:selectedLineNo, item:selectedItemCode, bin:currentBin, qty:qty });
+            // 3. AGGREGATION LOGIC: Check if this Item+Bin+Line already exists
+            const existingIndex = sessionPicks.findIndex(p => p.lineNo === selectedLineNo && p.bin === currentBin && p.item === selectedItemCode);
+            
+            if (existingIndex > -1) {
+                // Update existing entry
+                sessionPicks[existingIndex].qty += qty;
+                log(`Aggregated +${qty} to existing entry.`);
+            } else {
+                // Add new entry
+                sessionPicks.push({ id:Date.now(), lineNo:selectedLineNo, item:selectedItemCode, bin:currentBin, qty:qty });
+                log(`Added new entry: ${qty}`);
+            }
+
             saveToLocal();
             
+            // Visual feedback
             const q = document.getElementById('qtyInput');
             q.classList.remove('flash-active'); void q.offsetWidth; q.classList.add('flash-active');
-            updateSessionDisplay();
+            
+            updateSessionDisplay(); 
             showToast(`Added ${qty} x ${selectedItemCode}`, 'success');
             
             document.getElementById('itemInput').value = '';
-            if(isAutoMode) document.getElementById('itemInput').focus();
+            
+            // Reset Manual Input to 1 for convenience
+            if (!isAutoMode) {
+                document.getElementById('qtyInput').value = 1;
+            }
+            
+            // Re-focus
+            if(isAutoMode) setTimeout(() => safeFocus('itemInput'), 50);
         }
 
         function handleItemScan() {
             const scan = document.getElementById('itemInput').value.trim();
             if(!selectedItemCode || !scan) return;
-            if(!scan.toLowerCase().includes(selectedItemCode.trim().toLowerCase()) && 
-               !selectedItemCode.toLowerCase().includes(scan.toLowerCase())) {
-                showToast("Wrong Item!", 'error'); document.getElementById('itemInput').value=''; return;
+            
+            // Flexible matching
+            const match = scan.toLowerCase().includes(selectedItemCode.trim().toLowerCase()) || selectedItemCode.toLowerCase().includes(scan.toLowerCase());
+            
+            if(!match) {
+                showToast("Wrong Item!", 'error'); 
+                document.getElementById('itemInput').value=''; 
+                return;
             }
-            isAutoMode ? addToSession() : document.getElementById('qtyInput').focus();
+            
+            if (isAutoMode) {
+                addToSession();
+            } else {
+                document.getElementById('qtyInput').focus();
+            }
         }
 
         function submitFinal() {
             if(isSubmitting || sessionPicks.length===0) return;
             if(!navigator.onLine) { alert("OFFLINE. Move to Wi-Fi."); return; }
-            if(!confirm(`Submit ${sessionPicks.length} records?`)) return;
-
+            if(!confirm(`Submit ${sessionPicks.length} pick lines?`)) return;
+            
             isSubmitting = true;
-            const btn = document.getElementById('btnSubmit');
-            const txt = btn.innerHTML; btn.innerHTML = "<i class='fas fa-spinner fa-spin'></i>"; btn.disabled = true;
-
+            const btn = document.getElementById('btnSubmit'); 
+            const originalText = btn.innerHTML; 
+            btn.innerHTML = "⏳ Sending..."; 
+            btn.disabled = true;
+            
             const batchId = localStorage.getItem(`twg_batch_id_${SO_NUMBER}`);
 
             fetch('/process_batch_scan', {
                 method: 'POST', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ so:SO_NUMBER, picks:sessionPicks, batch_id:batchId })
             }).then(r=>r.json()).then(d => {
-                if(d.status==='success') {
-                    showToast("Success!", 'success'); clearLocal();
-                    setTimeout(()=>location.reload(), 1500);
-                } else {
-                    alert("ERROR: "+d.msg); isSubmitting=false; btn.innerHTML=txt; btn.disabled=false;
+                if(d.status==='success') { 
+                    showToast("Success!", 'success'); 
+                    clearLocal(); 
+                    setTimeout(()=>location.reload(), 1500); 
+                } else { 
+                    alert("ERROR: "+d.msg); 
+                    isSubmitting=false; btn.innerHTML=originalText; btn.disabled=false; 
                 }
-            }).catch(()=>{ alert("Network Failed"); isSubmitting=false; btn.innerHTML=txt; btn.disabled=false; });
+            }).catch(()=>{ 
+                alert("Network Failed"); 
+                isSubmitting=false; btn.innerHTML=originalText; btn.disabled=false; 
+            });
         }
 
-        // --- UTILS & HELPERS ---
+        // --- HELPERS ---
         function updateSessionDisplay() {
-            document.getElementById('scanCount').innerText = sessionPicks.length;
+            // Update the count on the VIEW button
+            const btnView = document.getElementById('scanCount');
+            // We show distinct lines now, or total qty? Let's show distinct lines (cleaner)
+            if(btnView) btnView.innerText = `(${sessionPicks.length})`;
+            
+            // Reset all table counters
             document.querySelectorAll('.picked-cell').forEach(c => c.innerText = "0");
-            sessionPicks.forEach(p => {
-                const c = document.querySelector(`.picked-cell[data-line="${p.lineNo}"]`);
-                if(c) c.innerText = parseFloat(c.innerText||0) + p.qty;
+            
+            // Sum up quantities for the Table View
+            sessionPicks.forEach(p => { 
+                const c = document.querySelector(`.picked-cell[data-line="${p.lineNo}"]`); 
+                if(c) {
+                    const currentVal = parseFloat(c.innerText||0);
+                    c.innerText = currentVal + p.qty; 
+                }
             });
-            if(selectedLineNo) {
-                 const t = sessionPicks.filter(p=>p.lineNo===selectedLineNo).reduce((s,p)=>s+p.qty,0);
-                 document.getElementById('qtyInput').value = t;
-            }
+            
+            // NOTE: We do NOT overwrite qtyInput here anymore.
+            // qtyInput stays as the "User Entry Field".
         }
-        function adjustQty(n) { if(!isAutoMode) { const i=document.getElementById('qtyInput'); i.value=Math.max(0, (parseFloat(i.value)||0)+n); } }
+
+        function adjustQty(n) { 
+            if(!isAutoMode) { 
+                const i=document.getElementById('qtyInput'); 
+                i.value=Math.max(0, (parseFloat(i.value)||0)+n); 
+            } 
+        }
+
         function showToast(m,t='info'){ 
-            const c=document.getElementById('toastContainer'), d=document.createElement('div');
-            d.className=`toast toast-${t}`; d.innerText=m; c.appendChild(d);
+            const c=document.getElementById('toastContainer'); 
+            const d=document.createElement('div'); 
+            d.style.cssText = `background:${t=='error'?'#e53e3e':'#38a169'}; color:white; padding:10px 20px; border-radius:4px; margin-bottom:10px; box-shadow:0 4px 6px rgba(0,0,0,0.1); font-weight:bold; font-size:14px;`;
+            d.innerText=m; c.appendChild(d);
             playBeep(t==='error'?'error':'success');
-            setTimeout(()=>{ d.style.opacity='0'; setTimeout(()=>d.remove(),300); }, 3000);
+            setTimeout(()=>{ d.style.opacity='0'; setTimeout(()=>d.remove(),300); }, 2000);
         }
+
         function openBinModal(){
             if(document.activeElement) document.activeElement.blur();
             if(!selectedItemCode) return;
             document.getElementById('binModal').style.display='flex';
             prefetchBins(selectedItemCode).then(()=>{ if(binCache[selectedItemCode]) populateBinList(binCache[selectedItemCode]); });
         }
+
         async function prefetchBins(item) {
             if(binCache[item]) return;
-            const l=document.getElementById('binList'); l.innerHTML='Loading...';
-            try {
-                const r=await fetch('/get_item_bins', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({item})});
-                const d=await r.json();
-                if(d.status==='success') { binCache[item]=d.bins; populateBinList(d.bins); }
-                else l.innerText=d.msg;
+            const l=document.getElementById('binList'); l.innerHTML='<div class="text-center" style="padding:20px;">Loading...</div>';
+            try { 
+                const r=await fetch('/get_item_bins', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({item})}); 
+                const d=await r.json(); 
+                if(d.status==='success') { binCache[item]=d.bins; populateBinList(d.bins); } 
+                else l.innerText=d.msg; 
             } catch(e) { l.innerText='Connection Failed'; }
         }
+
         function populateBinList(bins) {
-            const l=document.getElementById('binList'); l.innerHTML='';
-            if(!bins.length) { l.innerHTML='No Stock'; return; }
-            bins.forEach(b=>{
-                const d=document.createElement('div'); d.className='bin-row';
-                d.innerHTML=`<span class="bin-name">${b.bin}</span><span class="bin-qty">Qty: ${b.qty}</span>`;
-                l.appendChild(d);
+            const l=document.getElementById('binList'); l.innerHTML=''; 
+            if(!bins.length) { l.innerHTML='<div class="text-center" style="padding:20px;">No Stock</div>'; return; }
+            bins.forEach(b=>{ 
+                const d=document.createElement('div'); 
+                d.style.cssText = "display:flex; justify-content:space-between; padding:15px; border-bottom:1px solid #eee; font-size:16px;";
+                d.innerHTML=`<span style="font-weight:bold; color:#2b6cb0;">${b.bin}</span><span>Qty: ${b.qty}</span>`; 
+                l.appendChild(d); 
             });
         }
+
         function openReviewModal(){
             const l=document.getElementById('reviewList'); l.innerHTML='';
-            sessionPicks.forEach((p,i)=>{
-                l.innerHTML+=`<tr><td>${p.item}</td><td>${p.bin}</td><td>${p.qty}</td><td><button class="btn-sm btn-danger" onclick="removePick(${i})"><i class="fas fa-trash"></i></button></td></tr>`;
+            // Because we aggregate, this list is now clean and doesn't repeat items
+            sessionPicks.forEach((p,i)=>{ 
+                l.innerHTML+=`<tr><td>${p.item}</td><td>${p.bin}</td><td style="font-weight:bold;">${p.qty}</td><td><button class="btn-small-action" style="background:#e53e3e; padding: 2px 8px;" onclick="removePick(${i})">X</button></td></tr>`; 
             });
-            document.getElementById('emptyReview').style.display = sessionPicks.length?'none':'block';
+            document.getElementById('emptyReview').style.display = sessionPicks.length?'none':'block'; 
             document.getElementById('reviewModal').style.display='flex';
         }
-        function removePick(i){ if(confirm("Delete?")){ sessionPicks.splice(i,1); saveToLocal(); openReviewModal(); updateSessionDisplay(); } }
-        function closeModal(id){ document.getElementById(id).style.display='none'; }
 
-        // INPUT LISTENERS
-        document.getElementById('binInput').addEventListener('keypress', e=>{if(e.key==='Enter'){e.preventDefault(); validateBin();}});
-        document.getElementById('itemInput').addEventListener('keypress', e=>{if(e.key==='Enter'){e.preventDefault(); handleItemScan();}});
-        document.getElementById('qtyInput').addEventListener('keypress', e=>{if(e.key==='Enter'){e.preventDefault(); addToSession();}});
+        function removePick(i){ 
+            if(confirm("Remove this entry?")){ 
+                sessionPicks.splice(i,1); 
+                saveToLocal(); 
+                openReviewModal(); 
+                updateSessionDisplay(); 
+            } 
+        }
+        
+        function clearSession() {
+            if(confirm("Clear ALL scanned items?")) {
+                clearLocal();
+                closeModal('reviewModal');
+            }
+        }
+
+        function closeModal(id){ document.getElementById(id).style.display='none'; }
     </script>
 </body>
 </html>
