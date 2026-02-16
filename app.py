@@ -217,9 +217,18 @@ def get_item_bins():
         cursor = conn.cursor()
         loc_col = DB_COLS['ScanOnhand2'] or 'terr'
         
-        # Find bins with stock
+        # 1. Safely check for 'alloc' column (fallback to 0 if missing)
+        alloc_col = "0 as alloc"
+        try:
+            cursor.execute(f"SELECT TOP 1 alloc FROM {Config.DB_AUTH}.dbo.ScanOnhand2")
+            alloc_col = "alloc"
+        except:
+            pass # Keep default
+
+        # 2. Fetch Data
         sql = f"""
-            SELECT bin, onhand, {loc_col} FROM {Config.DB_AUTH}.dbo.ScanOnhand2 
+            SELECT bin, onhand, {alloc_col}, {loc_col} 
+            FROM {Config.DB_AUTH}.dbo.ScanOnhand2 
             WHERE item LIKE ? AND onhand > 0
         """
         params = [f"%{item_code}%"]
@@ -236,9 +245,17 @@ def get_item_bins():
         bins = []
         for row in rows:
             r = row_to_dict(cursor, row)
+            
+            # Safe calculation of Available
+            qty_onhand = int(r['onhand'])
+            qty_alloc = int(r['alloc'])
+            qty_avail = qty_onhand - qty_alloc
+            
             bins.append({
                 'bin': r['bin'].strip(),
-                'qty': int(r['onhand']),
+                'qty': qty_onhand,
+                'alloc': qty_alloc,
+                'avail': qty_avail,
                 'loc': r.get(loc_col, '').strip()
             })
             
@@ -290,7 +307,6 @@ def process_batch_scan():
     """
     CRITICAL: This function processes the batch.
     It uses DB Transactions to ensure partial failures do not corrupt data.
-    Now supports batch_id for tracking.
     """
     if 'user_id' not in session: return jsonify({'status':'error', 'msg':'Session expired'})
     detect_columns()
@@ -298,7 +314,7 @@ def process_batch_scan():
     data = request.json
     picks = data.get('picks', [])
     so_num = data.get('so', '')
-    batch_id = data.get('batch_id', str(uuid.uuid4())) # Use provided or generate new
+    batch_id = data.get('batch_id', str(uuid.uuid4()))
     user_id = session.get('user_id')
     
     if not picks:
@@ -314,7 +330,6 @@ def process_batch_scan():
         cursor = conn.cursor()
         
         # --- START TRANSACTION ---
-        
         processed_count = 0
         
         for pick in picks:
@@ -374,7 +389,6 @@ def process_batch_scan():
                     (item, bin, qty, userid, datetime, sono, type, upc)
                     VALUES (?, ?, ?, ?, GETDATE(), ?, 'PICK', ?)
                 """
-                # Note: We could store batch_id here if schema supported it.
                 cursor.execute(insert_hist_sql, (scanned_item, bin_loc, qty, user_id, so_num, upc_code))
 
             processed_count += 1

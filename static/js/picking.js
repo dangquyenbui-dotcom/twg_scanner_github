@@ -374,14 +374,47 @@ async function prefetchBins(item) {
 }
 
 function populateBinList(bins) {
-    const l=document.getElementById('binList'); l.innerHTML=''; 
-    if(!bins.length) { l.innerHTML='<div class="text-center" style="padding:20px;">No Stock</div>'; return; }
-    bins.forEach(b=>{ 
-        const d=document.createElement('div'); 
-        d.style.cssText = "display:flex; justify-content:space-between; padding:15px; border-bottom:1px solid #eee; font-size:16px;";
-        d.innerHTML=`<span style="font-weight:bold; color:#2b6cb0;">${b.bin}</span><span>Qty: ${b.qty}</span>`; 
-        l.appendChild(d); 
+    const l = document.getElementById('binList'); 
+    l.innerHTML = ''; 
+
+    if (!bins.length) { 
+        l.innerHTML = '<div class="text-center" style="padding:20px;">No Stock</div>'; 
+        return; 
+    }
+
+    // UPDATED: Create Table Header
+    let html = `
+        <table style="width:100%; border-collapse: collapse; font-size:12px;">
+            <thead style="background:#edf2f7; color:#4a5568;">
+                <tr>
+                    <th style="text-align:left; padding:8px; border-bottom:2px solid #cbd5e0;">BIN</th>
+                    <th style="text-align:center; padding:8px; border-bottom:2px solid #cbd5e0;">On Hand</th>
+                    <th style="text-align:center; padding:8px; border-bottom:2px solid #cbd5e0;">Alloc</th>
+                    <th style="text-align:center; padding:8px; border-bottom:2px solid #cbd5e0;">Avail</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+
+    // UPDATED: Create Rows with data
+    bins.forEach(b => { 
+        // Highlight logic: If Avail > 0, make it bold/green, else grey
+        const availStyle = b.avail > 0 ? 'font-weight:bold; color:#2d3748;' : 'color:#a0aec0;';
+        
+        html += `
+            <tr style="border-bottom:1px solid #e2e8f0;">
+                <td style="padding:10px 8px; font-weight:bold; color:#2b6cb0; font-size:14px;">${b.bin}</td>
+                <td style="text-align:center; padding:10px 8px;">${b.qty}</td>
+                <td style="text-align:center; padding:10px 8px; color:#e53e3e;">${b.alloc}</td>
+                <td style="text-align:center; padding:10px 8px; ${availStyle}">${b.avail}</td>
+            </tr>
+        `;
     });
+
+    html += `</tbody></table>`;
+    html += `<div style="text-align:right; font-size:10px; color:#a0aec0; padding:5px;">Tap outside to close</div>`;
+
+    l.innerHTML = html;
 }
 
 function openReviewModal(){
