@@ -65,7 +65,7 @@
                 </thead>
                 <tbody>
                     {% for item in items %}
-                    <tr onclick="selectRow(this, '{{ item.item }}', {{ item.remaining }}, {{ item.tranlineno }})" 
+                    <tr onclick="selectRow(this, '{{ item.item }}', {{ item.remaining }}, {{ item.tranlineno }}, '{{ item.upc }}')" 
                         class="item-row" id="row-{{ item.tranlineno }}">
                         <td style="color:#718096;">{{ item.tranlineno }}</td>
                         <td style="font-weight:bold; color:#2b6cb0;">{{ item.item }}</td>
@@ -156,17 +156,6 @@
     </div>
 
     <div id="debugConsole"></div>
-
-    <script>
-        const SERVER_DATA = {
-            soNumber: "{{ so|default('', true) }}"
-        };
-    </script>
-    
-    <script src="{{ url_for('static', filename='js/picking.js') }}"></script>
-</body>
-</html>
-<div id="debugConsole"></div>
 
     <script>
         const SERVER_DATA = {

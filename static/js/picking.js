@@ -6,7 +6,7 @@
 const SO_NUMBER = (typeof SERVER_DATA !== 'undefined' && SERVER_DATA.soNumber) ? SERVER_DATA.soNumber : ""; 
 let sessionPicks = [];
 let binCache = {};
-let selectedItemCode = null, selectedLineNo = null; 
+let selectedItemCode = null, selectedLineNo = null, selectedUpc = null; 
 let currentBinMaxQty = 999999, currentOrderMaxQty = 999999, currentBin = ""; 
 let isAutoMode = true, isSubmitting = false;
 
@@ -59,13 +59,15 @@ function handleAction(el) {
 
 // --- CORE LOGIC ---
 
-function selectRow(row, itemCode, remainingQty, lineNo) {
+// Updated to accept UPC
+function selectRow(row, itemCode, remainingQty, lineNo, upc) {
     unlockAudio();
     document.querySelectorAll('.item-row').forEach(r => r.classList.remove('active-row'));
     row.classList.add('active-row');
     
     selectedItemCode = itemCode; 
     selectedLineNo = lineNo; 
+    selectedUpc = upc ? upc.toString().trim() : ""; // Store UPC
     currentOrderMaxQty = remainingQty;
     
     document.getElementById('binInput').value = ''; 
@@ -75,6 +77,8 @@ function selectRow(row, itemCode, remainingQty, lineNo) {
     currentBinMaxQty = 999999; 
     setTimeout(() => safeFocus('binInput'), 100);
     prefetchBins(itemCode);
+    
+    if (selectedUpc) log(`Row Selected: ${itemCode} (UPC: ${selectedUpc})`);
 }
 
 function validateBin() {
@@ -150,10 +154,18 @@ function handleItemScan() {
     const scan = document.getElementById('itemInput').value.trim();
     if(!selectedItemCode || !scan) return;
     
-    const match = scan.toLowerCase().includes(selectedItemCode.trim().toLowerCase()) || selectedItemCode.toLowerCase().includes(scan.toLowerCase());
+    const scanNorm = scan.toLowerCase();
+    const itemNorm = selectedItemCode.toLowerCase();
+    const upcNorm = selectedUpc ? selectedUpc.toLowerCase() : "";
+
+    // VALIDATION: Check Loose Match on Item Code OR Exact Match on UPC
+    const match = 
+        scanNorm.includes(itemNorm) || 
+        itemNorm.includes(scanNorm) || 
+        (upcNorm && scanNorm === upcNorm);
     
     if(!match) {
-        showToast("Wrong Item!", 'error'); 
+        showToast("Wrong Item/UPC!", 'error'); 
         document.getElementById('itemInput').value=''; 
         if(isAutoMode) setTimeout(() => safeFocus('itemInput'), 50);
         return;

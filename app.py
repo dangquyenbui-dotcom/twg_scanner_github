@@ -172,7 +172,8 @@ def picking_menu():
             resolved_so = check_row[0] 
             user_loc = session.get('location', 'Unknown').strip()
             
-            # Fetch Lines (Filter by Location)
+            # 1. FETCH ORDER LINES (Reverted to original safe query)
+            # This ensures we get the lines even if UPC mapping fails
             base_sql = f"""
                 SELECT tranlineno, item, qtyord, shipqty, (qtyord - shipqty) as remaining, loctid 
                 FROM {Config.DB_ORDERS}.dbo.SOTRAN 
@@ -190,6 +191,43 @@ def picking_menu():
             rows = cursor.fetchall()
             order_items = [row_to_dict(cursor, row) for row in rows]
             
+            # 2. FETCH UPC MAPPING (Separate Step)
+            if order_items:
+                try:
+                    # Collect unique items from the order
+                    unique_items = list(set(i['item'] for i in order_items))
+                    
+                    if unique_items:
+                        # Build dynamic IN clause
+                        placeholders = ','.join(['?'] * len(unique_items))
+                        upc_sql = f"""
+                            SELECT item, upc 
+                            FROM {Config.DB_AUTH}.dbo.scanitem 
+                            WHERE item IN ({placeholders})
+                        """
+                        cursor.execute(upc_sql, tuple(unique_items))
+                        upc_rows = cursor.fetchall()
+                        
+                        # Create Map: Item -> UPC
+                        # Using row_to_dict to ensure column name safety
+                        upc_map = {}
+                        for r in upc_rows:
+                            d = row_to_dict(cursor, r)
+                            upc_map[d['item']] = d.get('upc', '')
+
+                        # Apply UPCs to order items
+                        for item in order_items:
+                            item['upc'] = upc_map.get(item['item'], '')
+                    
+                    # Ensure 'upc' key exists for all items even if lookup failed
+                    for item in order_items:
+                        if 'upc' not in item: item['upc'] = ''
+                        
+                except Exception as e:
+                    logging.error(f"UPC Fetch Error: {e}")
+                    # Fallback: Just set empty UPCs so the app doesn't crash
+                    for item in order_items: item['upc'] = ''
+
             if not order_items:
                 flash(f"✅ Order #{resolved_so.strip()} is fully picked!", "success")
                 
