@@ -253,13 +253,14 @@ def get_item_bins():
         loc_col = DB_COLS['ScanOnhand2_Loc'] or 'terr'
         alloc_col = DB_COLS['ScanOnhand2_Alloc'] or 'aloc'
 
-        # Fetch Data
+        # Fetch Data - CHANGED TO EXACT MATCH (=)
         sql = f"""
             SELECT bin, onhand, {alloc_col}, {loc_col} 
             FROM {Config.DB_AUTH}.dbo.ScanOnhand2 
-            WHERE item LIKE ? AND onhand > 0
+            WHERE item = ? AND onhand > 0
         """
-        params = [f"%{item_code}%"]
+        # Remove wildcard formatting, pass exact item_code
+        params = [item_code]
         
         if user_loc != '000' and user_loc != 'Unknown':
             sql += f" AND {loc_col} LIKE ?"
@@ -307,11 +308,13 @@ def validate_bin():
         cursor = conn.cursor()
         loc_col = DB_COLS['ScanOnhand2_Loc'] or 'terr'
         
+        # CHANGED TO EXACT MATCH (=) for Item
         sql = f"""
             SELECT TOP 1 onhand FROM {Config.DB_AUTH}.dbo.ScanOnhand2 
-            WHERE bin=? AND item LIKE ? AND onhand > 0
+            WHERE bin=? AND item = ? AND onhand > 0
         """
-        params = [bin_loc, f"%{item_code}%"]
+        # Remove wildcard formatting
+        params = [bin_loc, item_code]
         
         if user_loc != '000' and user_loc != 'Unknown':
             sql += f" AND {loc_col} LIKE ?"
