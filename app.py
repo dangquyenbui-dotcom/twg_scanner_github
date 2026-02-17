@@ -172,8 +172,8 @@ def picking_menu():
             resolved_so = check_row[0] 
             user_loc = session.get('location', 'Unknown').strip()
             
-            # 1. FETCH ORDER LINES (Reverted to original safe query)
-            # This ensures we get the lines even if UPC mapping fails
+            # 1. FETCH ORDER LINES
+            # Standard query with location filtering if applicable
             base_sql = f"""
                 SELECT tranlineno, item, qtyord, shipqty, (qtyord - shipqty) as remaining, loctid 
                 FROM {Config.DB_ORDERS}.dbo.SOTRAN 
@@ -195,7 +195,8 @@ def picking_menu():
             if order_items:
                 try:
                     # Collect unique items from the order
-                    unique_items = list(set(i['item'] for i in order_items))
+                    # FIX: Strip whitespace immediately to ensure clean keys
+                    unique_items = list(set((i['item'] or '').strip() for i in order_items))
                     
                     if unique_items:
                         # Build dynamic IN clause
@@ -209,23 +210,33 @@ def picking_menu():
                         upc_rows = cursor.fetchall()
                         
                         # Create Map: Item -> UPC
-                        # Using row_to_dict to ensure column name safety
                         upc_map = {}
                         for r in upc_rows:
                             d = row_to_dict(cursor, r)
-                            upc_map[d['item']] = d.get('upc', '')
+                            
+                            # FIX: STRICT DATA CLEANING
+                            # 1. Handle Key: Strip the item code from DB (e.g., '5200   ' -> '5200')
+                            # 2. Handle Value: Handle None -> '' and strip the UPC
+                            
+                            db_item = (d.get('item') or '').strip()
+                            raw_upc = d.get('upc')
+                            clean_upc = str(raw_upc).strip() if raw_upc is not None else ''
+                            
+                            upc_map[db_item] = clean_upc
 
                         # Apply UPCs to order items
                         for item in order_items:
-                            item['upc'] = upc_map.get(item['item'], '')
+                            # Strip item from SOTRAN to match the dictionary key
+                            clean_item_code = (item.get('item') or '').strip()
+                            item['item'] = clean_item_code # Update the item code itself to be clean
+                            item['upc'] = upc_map.get(clean_item_code, '')
                     
-                    # Ensure 'upc' key exists for all items even if lookup failed
+                    # Ensure 'upc' key exists for all items
                     for item in order_items:
                         if 'upc' not in item: item['upc'] = ''
                         
                 except Exception as e:
                     logging.error(f"UPC Fetch Error: {e}")
-                    # Fallback: Just set empty UPCs so the app doesn't crash
                     for item in order_items: item['upc'] = ''
 
             if not order_items:
@@ -253,13 +264,12 @@ def get_item_bins():
         loc_col = DB_COLS['ScanOnhand2_Loc'] or 'terr'
         alloc_col = DB_COLS['ScanOnhand2_Alloc'] or 'aloc'
 
-        # Fetch Data - CHANGED TO EXACT MATCH (=)
+        # Fetch Data - Exact Match
         sql = f"""
             SELECT bin, onhand, {alloc_col}, {loc_col} 
             FROM {Config.DB_AUTH}.dbo.ScanOnhand2 
             WHERE item = ? AND onhand > 0
         """
-        # Remove wildcard formatting, pass exact item_code
         params = [item_code]
         
         if user_loc != '000' and user_loc != 'Unknown':
@@ -275,16 +285,21 @@ def get_item_bins():
         for row in rows:
             r = row_to_dict(cursor, row)
             
-            qty_onhand = int(r['onhand'])
-            qty_alloc = int(r.get(alloc_col, 0)) 
+            # --- FIX: SAFE CONVERSIONS (Handle None/NULL) ---
+            qty_onhand = int(r.get('onhand') or 0)
+            qty_alloc = int(r.get(alloc_col) or 0) 
             qty_avail = qty_onhand - qty_alloc
             
+            # --- FIX: SAFE STRING HANDLING ---
+            bin_val = (r.get('bin') or '').strip()
+            loc_val = (r.get(loc_col) or '').strip()
+
             bins.append({
-                'bin': r['bin'].strip(),
+                'bin': bin_val,
                 'qty': qty_onhand,
                 'alloc': qty_alloc,
                 'avail': qty_avail,
-                'loc': r.get(loc_col, '').strip()
+                'loc': loc_val
             })
             
         return jsonify({'status': 'success', 'bins': bins})
@@ -308,12 +323,10 @@ def validate_bin():
         cursor = conn.cursor()
         loc_col = DB_COLS['ScanOnhand2_Loc'] or 'terr'
         
-        # CHANGED TO EXACT MATCH (=) for Item
         sql = f"""
             SELECT TOP 1 onhand FROM {Config.DB_AUTH}.dbo.ScanOnhand2 
             WHERE bin=? AND item = ? AND onhand > 0
         """
-        # Remove wildcard formatting
         params = [bin_loc, item_code]
         
         if user_loc != '000' and user_loc != 'Unknown':
@@ -323,8 +336,12 @@ def validate_bin():
         cursor.execute(sql, tuple(params))
         row = cursor.fetchone()
         
-        if row: return jsonify({'status': 'success', 'onhand': int(row[0])})
-        else: return jsonify({'status': 'error', 'msg': f"❌ Bin '{bin_loc}' Empty/Mismatch"})
+        if row: 
+            # --- FIX: Handle potential NULL onhand ---
+            safe_onhand = int(row[0] or 0)
+            return jsonify({'status': 'success', 'onhand': safe_onhand})
+        else: 
+            return jsonify({'status': 'error', 'msg': f"❌ Bin '{bin_loc}' Empty/Mismatch"})
     except Exception as e:
         return jsonify({'status': 'error', 'msg': str(e)})
     finally:
@@ -334,7 +351,6 @@ def validate_bin():
 def process_batch_scan():
     """
     PRODUCTION MODE: Commits updates to ScanOnhand2, SOTRAN, and ScanBinTran2.
-    Uses a single transaction block for safety.
     """
     if 'user_id' not in session: return jsonify({'status':'error', 'msg':'Session expired'})
     detect_columns()
@@ -343,7 +359,6 @@ def process_batch_scan():
     picks = data.get('picks', [])
     so_num = data.get('so', '')
     batch_id = data.get('batch_id') or str(uuid.uuid4())
-    # Device ID is blank as requested
     device_id = '' 
     user_id = session.get('user_id')
     user_loc = session.get('location', 'Unknown')
@@ -371,17 +386,17 @@ def process_batch_scan():
 
             if qty <= 0: continue
 
+            # --- FIX: ISNULL ADDED ---
             update_inv_sql = f"""
                 UPDATE {Config.DB_AUTH}.dbo.ScanOnhand2
-                SET {col_alloc} = {col_alloc} + ?, 
-                    avail = onhand - ({col_alloc} + ?),
+                SET {col_alloc} = ISNULL({col_alloc}, 0) + ?, 
+                    avail = onhand - (ISNULL({col_alloc}, 0) + ?),
                     lupdate = GETDATE(),
                     luser = ?
                 WHERE item=? AND bin=? AND {col_loc}=?
             """
             cursor.execute(update_inv_sql, (qty, qty, user_id, item, bin_val, user_loc))
             
-            # Double Check: Ensure the bin existed
             if cursor.rowcount == 0:
                 raise Exception(f"Inventory Update Failed: {item} at {bin_val} not found in {user_loc}")
 
@@ -410,7 +425,6 @@ def process_batch_scan():
             """
             cursor.execute(update_so_sql, (agg_qty, so_num, line_no, item_code))
             
-            # Double Check: Ensure the order line existed
             if cursor.rowcount == 0:
                 raise Exception(f"Order Update Failed: Line {line_no} for {item_code} not found.")
 
@@ -429,7 +443,6 @@ def process_batch_scan():
                 (actiontype, applid, udref, tranlineno, upc, item, binfr, quantity, userid, deviceid, adddate, scanstat, scanresult)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), ?, ?)
             """
-            # Updated to pass empty strings for scanstat and scanresult
             cursor.execute(insert_sql, ('SP', 'SO', so_num, line_no, upc_val, item, bin_val, qty, user_id, device_id, '', ''))
 
         # --- FINAL COMMIT ---

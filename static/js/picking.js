@@ -65,9 +65,17 @@ function selectRow(row, itemCode, remainingQty, lineNo, upc) {
     document.querySelectorAll('.item-row').forEach(r => r.classList.remove('active-row'));
     row.classList.add('active-row');
     
-    selectedItemCode = itemCode; 
+    // FIX: Aggressive Cleaning for Item and UPC
+    selectedItemCode = itemCode ? itemCode.toString().trim() : ""; 
     selectedLineNo = lineNo; 
-    selectedUpc = upc ? upc.toString().trim() : ""; // Store UPC
+    
+    // FIX: Ensure 'None' string (from template leakage) or nulls are treated as empty
+    if (!upc || upc === 'None' || upc === 'null') {
+        selectedUpc = "";
+    } else {
+        selectedUpc = upc.toString().trim();
+    }
+    
     currentOrderMaxQty = remainingQty;
     
     document.getElementById('binInput').value = ''; 
@@ -76,9 +84,9 @@ function selectRow(row, itemCode, remainingQty, lineNo, upc) {
     updateSessionDisplay(sessionPicks);
     currentBinMaxQty = 999999; 
     setTimeout(() => safeFocus('binInput'), 100);
-    prefetchBins(itemCode);
+    prefetchBins(selectedItemCode); 
     
-    if (selectedUpc) log(`Row Selected: ${itemCode} (UPC: ${selectedUpc})`);
+    if (selectedUpc) log(`Row Selected: ${selectedItemCode} (UPC: ${selectedUpc})`);
 }
 
 function validateBin() {
@@ -155,11 +163,10 @@ function handleItemScan() {
     if(!selectedItemCode || !scan) return;
     
     const scanNorm = scan.toLowerCase();
-    const itemNorm = selectedItemCode.toLowerCase();
+    const itemNorm = (selectedItemCode || "").trim().toLowerCase();
     const upcNorm = selectedUpc ? selectedUpc.toLowerCase() : "";
 
     // VALIDATION: Strict Match on Item Code OR Exact Match on UPC
-    // Changed from .includes() to strict equality to prevent scanning 5454 matching 5454-B
     const match = 
         scanNorm === itemNorm || 
         (upcNorm && scanNorm === upcNorm);
