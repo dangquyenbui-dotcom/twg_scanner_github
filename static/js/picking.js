@@ -158,10 +158,10 @@ function handleItemScan() {
     const itemNorm = selectedItemCode.toLowerCase();
     const upcNorm = selectedUpc ? selectedUpc.toLowerCase() : "";
 
-    // VALIDATION: Check Loose Match on Item Code OR Exact Match on UPC
+    // VALIDATION: Strict Match on Item Code OR Exact Match on UPC
+    // Changed from .includes() to strict equality to prevent scanning 5454 matching 5454-B
     const match = 
-        scanNorm.includes(itemNorm) || 
-        itemNorm.includes(scanNorm) || 
+        scanNorm === itemNorm || 
         (upcNorm && scanNorm === upcNorm);
     
     if(!match) {
