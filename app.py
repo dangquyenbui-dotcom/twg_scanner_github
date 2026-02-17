@@ -40,7 +40,7 @@ def row_to_dict(cursor, row):
     return dict(zip(columns, row))
 
 def detect_columns():
-    """Dynamically detects column names to handle schema variations."""
+    """Dynamically detects column names to handle schema variations (aloc vs alloc)."""
     if DB_COLS['ScanOnhand2_Loc']: return 
     
     conn = get_db_connection()
@@ -54,10 +54,12 @@ def detect_columns():
             cursor.execute(f"SELECT TOP 1 * FROM {Config.DB_AUTH}.dbo.ScanOnhand2")
             cols = [c[0].lower() for c in cursor.description]
             
+            # Location Column
             if 'loctid' in cols: DB_COLS['ScanOnhand2_Loc'] = 'loctid'
             elif 'terr' in cols: DB_COLS['ScanOnhand2_Loc'] = 'terr'
             else: DB_COLS['ScanOnhand2_Loc'] = 'terr'
             
+            # Alloc Column (aloc vs alloc)
             if 'aloc' in cols: DB_COLS['ScanOnhand2_Alloc'] = 'aloc'
             elif 'alloc' in cols: DB_COLS['ScanOnhand2_Alloc'] = 'alloc'
             else: DB_COLS['ScanOnhand2_Alloc'] = 'aloc'
@@ -117,10 +119,13 @@ def login():
             if row:
                 user = row_to_dict(cursor, row)
                 session['user_id'] = user.get('userid', '').strip()
+                
+                # Determine Location
                 loc_col = DB_COLS['ScanUsers_Loc'] or 'location'
                 raw_loc = user.get(loc_col)
                 session['location'] = str(raw_loc).strip() if raw_loc else 'Unknown'
                 
+                # Update Online Status
                 try:
                     update_sql = f"UPDATE {Config.DB_AUTH}.dbo.ScanUsers SET userstat=1 WHERE userid=?"
                     cursor.execute(update_sql, (user_id_input,))
@@ -155,6 +160,7 @@ def picking_menu():
         try:
             cursor = conn.cursor()
             
+            # Validate Order
             check_sql = f"SELECT TOP 1 sono FROM {Config.DB_ORDERS}.dbo.SOTRAN WHERE sono LIKE ?"
             cursor.execute(check_sql, (f"%{raw_so.strip()}",))
             check_row = cursor.fetchone()
@@ -166,6 +172,7 @@ def picking_menu():
             resolved_so = check_row[0] 
             user_loc = session.get('location', 'Unknown').strip()
             
+            # Fetch Lines (Filter by Location)
             base_sql = f"""
                 SELECT tranlineno, item, qtyord, shipqty, (qtyord - shipqty) as remaining, loctid 
                 FROM {Config.DB_ORDERS}.dbo.SOTRAN 
@@ -208,6 +215,7 @@ def get_item_bins():
         loc_col = DB_COLS['ScanOnhand2_Loc'] or 'terr'
         alloc_col = DB_COLS['ScanOnhand2_Alloc'] or 'aloc'
 
+        # Fetch Data
         sql = f"""
             SELECT bin, onhand, {alloc_col}, {loc_col} 
             FROM {Config.DB_AUTH}.dbo.ScanOnhand2 
@@ -227,6 +235,7 @@ def get_item_bins():
         bins = []
         for row in rows:
             r = row_to_dict(cursor, row)
+            
             qty_onhand = int(r['onhand'])
             qty_alloc = int(r.get(alloc_col, 0)) 
             qty_avail = qty_onhand - qty_alloc
@@ -376,10 +385,11 @@ def process_batch_scan():
 
             insert_sql = f"""
                 INSERT INTO {Config.DB_AUTH}.dbo.ScanBinTran2 
-                (actiontype, applid, udref, tranlineno, upc, item, binfr, quantity, userid, deviceid, adddate)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE())
+                (actiontype, applid, udref, tranlineno, upc, item, binfr, quantity, userid, deviceid, adddate, scanstat, scanresult)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), ?, ?)
             """
-            cursor.execute(insert_sql, ('SP', 'SO', so_num, line_no, upc_val, item, bin_val, qty, user_id, device_id))
+            # Updated to pass empty strings for scanstat and scanresult
+            cursor.execute(insert_sql, ('SP', 'SO', so_num, line_no, upc_val, item, bin_val, qty, user_id, device_id, '', ''))
 
         # --- FINAL COMMIT ---
         conn.commit()
