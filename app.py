@@ -195,8 +195,7 @@ def picking_menu():
             if order_items:
                 try:
                     # Collect unique items from the order
-                    # FIX: Strip whitespace immediately to ensure clean keys
-                    unique_items = list(set((i['item'] or '').strip() for i in order_items))
+                    unique_items = list(set(i['item'] for i in order_items))
                     
                     if unique_items:
                         # Build dynamic IN clause
@@ -210,33 +209,23 @@ def picking_menu():
                         upc_rows = cursor.fetchall()
                         
                         # Create Map: Item -> UPC
+                        # Using row_to_dict to ensure column name safety
                         upc_map = {}
                         for r in upc_rows:
                             d = row_to_dict(cursor, r)
-                            
-                            # FIX: STRICT DATA CLEANING
-                            # 1. Handle Key: Strip the item code from DB (e.g., '5200   ' -> '5200')
-                            # 2. Handle Value: Handle None -> '' and strip the UPC
-                            
-                            db_item = (d.get('item') or '').strip()
-                            raw_upc = d.get('upc')
-                            clean_upc = str(raw_upc).strip() if raw_upc is not None else ''
-                            
-                            upc_map[db_item] = clean_upc
+                            upc_map[d['item']] = d.get('upc', '')
 
                         # Apply UPCs to order items
                         for item in order_items:
-                            # Strip item from SOTRAN to match the dictionary key
-                            clean_item_code = (item.get('item') or '').strip()
-                            item['item'] = clean_item_code # Update the item code itself to be clean
-                            item['upc'] = upc_map.get(clean_item_code, '')
+                            item['upc'] = upc_map.get(item['item'], '')
                     
-                    # Ensure 'upc' key exists for all items
+                    # Ensure 'upc' key exists for all items even if lookup failed
                     for item in order_items:
                         if 'upc' not in item: item['upc'] = ''
                         
                 except Exception as e:
                     logging.error(f"UPC Fetch Error: {e}")
+                    # Fallback: Just set empty UPCs so the app doesn't crash
                     for item in order_items: item['upc'] = ''
 
             if not order_items:
@@ -286,11 +275,13 @@ def get_item_bins():
             r = row_to_dict(cursor, row)
             
             # --- FIX: SAFE CONVERSIONS (Handle None/NULL) ---
+            # Use (val or 0) pattern to handle DB NULLs gracefully
             qty_onhand = int(r.get('onhand') or 0)
             qty_alloc = int(r.get(alloc_col) or 0) 
             qty_avail = qty_onhand - qty_alloc
             
             # --- FIX: SAFE STRING HANDLING ---
+            # Ensure we don't call .strip() on None
             bin_val = (r.get('bin') or '').strip()
             loc_val = (r.get(loc_col) or '').strip()
 
@@ -387,6 +378,8 @@ def process_batch_scan():
             if qty <= 0: continue
 
             # --- FIX: ISNULL ADDED ---
+            # If 'aloc' is NULL in DB, (NULL + qty) = NULL, destroying data.
+            # ISNULL(col, 0) treats NULL as 0 for the math, preserving data.
             update_inv_sql = f"""
                 UPDATE {Config.DB_AUTH}.dbo.ScanOnhand2
                 SET {col_alloc} = ISNULL({col_alloc}, 0) + ?, 
