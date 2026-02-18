@@ -37,15 +37,19 @@ html, body {
     flex-direction: column;
     background: var(--bg-primary);
     z-index: 1;
-    transition: all 0.2s ease-in-out;
+    transition: all 0.2s ease;
 }
 
-/* KEYBOARD HANDLING: ONLY SHIFT WHEN EXPLICITLY CLICKED */
+/* KEYBOARD HANDLING: TRIGGERED VIA TOUCH ONLY */
 .tc52-layout.keyboard-visible .tc52-header {
     display: none;
 }
 .tc52-layout.keyboard-visible .tc52-grid {
-    flex: 0 0 60px; /* Minimal view of selected item while typing */
+    flex: 0 0 60px; /* Compress grid to make room for inputs */
+    overflow-y: hidden;
+}
+.tc52-layout.keyboard-visible .tc52-controls {
+    flex: 1 1 auto; /* Allow controls to expand if needed */
 }
 
 /* --- HEADER --- */
@@ -68,7 +72,7 @@ html, body {
     border-bottom: 1px solid #ccc;
     -webkit-overflow-scrolling: touch;
     position: relative;
-    transition: flex 0.2s ease-in-out;
+    transition: flex 0.2s ease;
 }
 
 /* --- CONTROLS (Footer) --- */

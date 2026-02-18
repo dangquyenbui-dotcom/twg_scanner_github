@@ -35,13 +35,19 @@ function attachKeyboardAvoidance() {
     const layout = document.getElementById('mainLayout');
 
     inputs.forEach(input => {
-        // ONLY trigger shift on actual click/touch to avoid aggressive shifts during auto-focus
-        input.addEventListener('mousedown', () => {
-            if (layout) layout.classList.add('keyboard-visible');
-        });
-        input.addEventListener('touchstart', () => {
-            if (layout) layout.classList.add('keyboard-visible');
-        });
+        // Triggered when user manually taps the field
+        const triggerShift = () => {
+            if (layout) {
+                layout.classList.add('keyboard-visible');
+                // Force scroll to the bottom of the form so the input is visible
+                setTimeout(() => {
+                    input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }, 100);
+            }
+        };
+
+        input.addEventListener('mousedown', triggerShift);
+        input.addEventListener('touchstart', triggerShift);
 
         input.addEventListener('blur', () => {
             if (layout) layout.classList.remove('keyboard-visible');
@@ -133,7 +139,6 @@ function selectRow(row, itemCode, remainingQty, lineNo, upc) {
     
     updateSessionDisplay(sessionPicks);
     currentBinMaxQty = 999999; 
-    // safeFocus focuses the input for hardware scanning but does NOT trigger keyboard layout shift
     setTimeout(() => safeFocus('binInput'), 100);
     prefetchBins(selectedItemCode); 
 }
@@ -268,7 +273,7 @@ function saveToLocal() {
 }
 
 function loadFromLocal() { 
-    const s = localStorage.getItem(`twg_picks_${SO_NUMBER}`); 
+    const s = localStorage.getItem(`twpicks_${SO_NUMBER}`); 
     if(s) try { sessionPicks = JSON.parse(s); } catch(e){} 
 }
 
