@@ -34,13 +34,8 @@ window.addEventListener('offline', () => updateStatusUI(false));
  * Determines if the user is actively typing via a virtual (on-screen) keyboard.
  * Hardware barcode scanners inject text with inputMode='none' or very rapidly,
  * while virtual keyboard users will have inputMode set to 'text', 'numeric', etc.
- * 
- * When the virtual keyboard is active, we must NOT auto-trigger validation
- * on the debounce timer — the user needs time to finish typing manually.
  */
 function isVirtualKeyboardActive(el) {
-    // If inputMode is explicitly set to something other than 'none', 
-    // the user opened the virtual keyboard via toggleKeyboard().
     return el.inputMode && el.inputMode !== 'none';
 }
 
@@ -69,9 +64,6 @@ function attachScannerListeners() {
             }
 
             // --- FIX: Only auto-trigger if virtual keyboard is NOT active ---
-            // Hardware scanners inject text rapidly with inputMode='none'.
-            // If the user has the virtual keyboard open (inputMode='text'/'numeric'),
-            // we skip auto-trigger and let them press Enter when ready.
             if (isVirtualKeyboardActive(el)) {
                 log(`Virtual keyboard active on ${el.id} — waiting for Enter key.`);
                 return;
@@ -137,7 +129,12 @@ function selectRow(row, itemCode, remainingQty, lineNo, upc) {
     updateSessionDisplay(sessionPicks);
     currentBinMaxQty = 999999; 
     setTimeout(() => safeFocus('binInput'), 100);
-    prefetchBins(selectedItemCode); 
+    prefetchBins(selectedItemCode);
+
+    // Update the keyboard context bar with selected item info
+    if (typeof window.updateContextBar === 'function') {
+        window.updateContextBar();
+    }
 }
 
 function validateBin() {
@@ -164,6 +161,11 @@ function verifySuccess(qty, bin) {
     currentBinMaxQty = qty; currentBin = bin;
     showToast(`Verified. Max: ${qty}`, 'success'); 
     safeFocus('itemInput');
+
+    // Update context bar with bin info
+    if (typeof window.updateContextBar === 'function') {
+        window.updateContextBar();
+    }
 }
 
 function addToSession() {

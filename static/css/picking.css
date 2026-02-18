@@ -34,3 +34,84 @@
     font-size: 10px; 
     padding: 5px;
 }
+
+/* --- KEYBOARD-AWARE LAYOUT --- */
+
+/* When keyboard is open, the layout height is set dynamically via JS.
+   The grid (middle section) collapses to give room for controls. */
+.tc52-layout.keyboard-open .tc52-grid {
+    /* Allow grid to shrink significantly so controls stay visible */
+    min-height: 40px;
+}
+
+/* When keyboard is open, make header more compact to save space */
+.tc52-layout.keyboard-open .tc52-header {
+    padding: 3px 10px;
+}
+
+.tc52-layout.keyboard-open .tc52-header > div:first-child {
+    font-size: 12px;
+}
+
+/* Compact the order bar when keyboard is open */
+.tc52-layout.keyboard-open .tc52-header > div:last-child {
+    margin-top: 2px;
+    padding: 2px 4px;
+}
+
+/* When keyboard is open, tighten up controls spacing */
+.tc52-layout.keyboard-open .tc52-controls {
+    padding: 4px 8px;
+    gap: 2px;
+}
+
+.tc52-layout.keyboard-open .tc52-controls .control-row {
+    gap: 4px;
+}
+
+.tc52-layout.keyboard-open .tc52-controls .control-label {
+    font-size: 11px;
+    width: 55px;
+}
+
+.tc52-layout.keyboard-open .tc52-controls .scan-input {
+    height: 30px;
+    font-size: 15px;
+}
+
+/* Hide footer buttons row when keyboard is open to save space */
+.tc52-layout.keyboard-open .btn-footer-group {
+    display: none;
+}
+
+/* Highlight the active input field more prominently when keyboard is open */
+.tc52-layout.keyboard-open .scan-input:focus {
+    border-color: #2b6cb0;
+    border-width: 2px;
+    background-color: #fffff0;
+    box-shadow: 0 0 0 2px rgba(43, 108, 176, 0.3);
+}
+
+/* Selected row mini-banner that shows above controls when keyboard is open */
+.keyboard-context-bar {
+    display: none;
+    background: #fefcbf;
+    border-bottom: 1px solid #d69e2e;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-weight: bold;
+    color: #744210;
+    flex: 0 0 auto;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tc52-layout.keyboard-open .keyboard-context-bar {
+    display: block;
+}
+
+/* When keyboard is NOT open, hide the context bar */
+.tc52-layout:not(.keyboard-open) .keyboard-context-bar {
+    display: none;
+}
