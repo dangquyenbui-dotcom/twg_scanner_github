@@ -1,13 +1,24 @@
+### 1. Updated `requirements.txt`
 
-### `README.md`
+This file contains the necessary Python dependencies to run the Flask application and connect to the SQL Server database.
+
+```text
+flask
+pyodbc
+python-dotenv
+
+```
+
+### 2. Updated `README.md`
+
+This document provides a comprehensive overview of the project, including its current phase, features, security logic, and the specific UI/UX behaviors implemented for the Zebra TC52.
 
 ```markdown
 # TWG Warehouse Scanner (Web App)
 
 ## 📌 Current Project Status
-**Phase:** 3 - Batch Scanning & Logic Validation
-**Write Mode:** 🔴 **READ-ONLY / SIMULATION**
-*The application currently validates all logic (Inventory limits, Order limits, Location checks) but returns a "Simulation Success" message instead of executing `INSERT` or `UPDATE` SQL statements.*
+**Phase:** 3 - Batch Scanning & Logic Validation  
+**Current Mode:** 🟢 **LIVE COMMIT MODE** *The application validates all logic (Inventory, Order limits, Location checks) and performs live SQL `UPDATE` and `INSERT` operations to the database.*
 
 ---
 
@@ -22,7 +33,7 @@
 ## ⚙️ Configuration & Settings
 
 ### Environment Variables (`.env`)
-The application relies on a `.env` file for database credentials.
+The application relies on a `.env` file for database credentials and server settings.
 ```ini
 DB_DRIVER={ODBC Driver 17 for SQL Server}
 DB_SERVER=YOUR_SERVER_IP
@@ -33,83 +44,51 @@ DB_ORDERS=PRO05   # Sales Order DB
 
 ```
 
-### Smart Column Detection (Global Cache)
+### Smart Column Detection
 
-Because the database schema varies (e.g., `terr` vs `loctid`), the app runs `detect_columns()` on login to identify valid column names.
-
-* **Inventory Location:** Checks `ScanOnhand2` for `loctid`, `terr`, or `location_id`.
-* **User Location:** Checks `ScanUsers` for `location` or `location_id`.
-* **UPC Support:** Checks if `ScanBinTran2` and `ScanItem` have a `upc` column.
+On login, the app runs `detect_columns()` to identify schema variations across different warehouse environments (e.g., detecting if the location column is named `terr` or `loctid`).
 
 ---
 
-## 🧠 Core Logic & Workflows
+## 🧠 Core Logic & Features
 
-### 1. Authentication (`/login`)
+### 1. Enhanced Sales Order Input
 
-* **Input:** User ID (Scanned) & Password.
-* **Logic:**
-* Validates against `ScanUsers`.
-* **Location Locking:** Captures the user's warehouse (e.g., 'ATL').
-* Updates `userstat=1` (Online).
+* **Hybrid Input Support:** Supports both manual typing and hardware scanner input.
+* **Flexible Formatting:** Automatically handles Sales Order strings with leading spaces (e.g., `"   1234567"`) or standard strings (`"1234567"`).
+* **Auto-Submission:** The system detects when a valid 7-digit Sales Order is entered (after trimming) and proceeds automatically.
 
+### 2. Selective Control Locking (Safety Guard)
 
+To prevent pick errors, the UI enforces a strict "Select-First" workflow:
 
-### 2. Picking Workflow (`/picking`)
+* **Default State:** Upon entering the picking screen, all functional controls (Bin Scan, Item Scan, Qty, Bins button) are greyed out and disabled.
+* **Activation:** Controls are only enabled once a user explicitly selects a specific line item from the Sales Order grid.
 
-This is the primary feature. The workflow forces a specific sequence to ensure physical verification.
+### 3. Picking Workflow & Guards
 
-#### A. Order Selection
-
-* User scans Sales Order (SO).
-* **Validation:**
-* Does SO exist?
-* **Location Guard:** If User is 'ATL' but Order is 'LA', access is **BLOCKED** (unless User is Admin/000).
-
-
-
-#### B. Item Selection (Grid)
-
-* User sees a list of items for that SO (Filtered by their Location).
-* **Interaction:** User **MUST** tap a row to select an item.
-* **Data:** Row stores `data-remaining` (Qty Ordered - Qty Shipped) for validation limits.
-
-#### C. Bin Validation (Step 1)
-
-* User scans a Bin Label.
-* **Endpoint:** `/validate_bin`
-* **Logic:** Checks if the selected item exists in the scanned bin with `onhand > 0`.
-* **Result:** Returns the specific `currentBinMaxQty` (e.g., "Bin has 5 items").
-
-#### D. Item Scanning (Step 2)
-
-* User scans the Item/UPC.
-* **Logic:**
-* **Match Check:** Scanned string must match Selected Item Code.
-* **Auto Mode:** Increments Session Qty by 1 automatically.
-* **Manual Mode:** Focuses Qty input for manual entry.
+* **Bin Validation:** Users must scan a bin; the system verifies the item exists in that bin with available on-hand quantity.
+* **Item Verification:** Scanned Item codes or UPCs must match the selected line item.
+* **Quantity Guards:** * **Bin Limit:** Prevents picking more than is physically available in the scanned bin.
+* **Order Limit:** Prevents over-picking beyond the remaining order quantity.
 
 
 
-#### E. Quantity Guards (Double Control)
+### 4. Batch Submission
 
-Before adding to the local "Shopping Cart" (Session), the system checks:
+* **Local Shopping Cart:** Picks are stored in `sessionPicks` locally, allowing users to pick from multiple bins for a single line before submitting.
+* **Transactional Integrity:** On submission, the app uses SQL transactions to update `ScanOnhand2` (Inventory), `SOTRAN` (Orders), and `ScanBinTran2` (Audit Log) simultaneously.
 
-1. **Bin Limit:** `SessionQty + NewQty <= currentBinMaxQty` (Don't pick more than physically exists in that bin).
-2. **Order Limit:** `TotalPickedForLine + NewQty <= RemainingOrderQty` (Don't over-pick the order).
+---
 
-### 3. Batching & Submission
+## 📱 UI/UX Specifics
 
-* **Local Storage:** Picks are stored in a JavaScript array `sessionPicks`.
-* **Multi-Bin Support:** Users can pick 5 from Bin A, then 5 from Bin B. Both entries are stored.
-* **Review:** "View Scanned" modal allows deleting incorrect entries before submission.
-* **Submit:**
-* Endpoint: `/process_batch_scan`
-* Iterates through the batch.
-* Re-validates **Inventory** and **Order Limits** on the server side (Security).
-* **Current Action:** Returns JSON `{status: 'success', msg: 'SIMULATION...'}`.
+* **High Contrast:** Designed for warehouse lighting with large touch targets.
+* **Visual Feedback:** * **Active Row:** Highlights the currently selected line item in yellow.
+* **Flash Effects:** Inputs flash green upon a successful scan.
 
 
+* **Full-Screen Mode:** Includes a dedicated toggle to maximize screen real estate on mobile browsers.
 
 ---
 
@@ -117,32 +96,11 @@ Before adding to the local "Shopping Cart" (Session), the system checks:
 
 | Endpoint | Method | Purpose |
 | --- | --- | --- |
-| `/login` | POST | Authenticates user & detects DB columns. |
-| `/picking` | GET | Fetches SO lines (Filtered by Location). |
-| `/get_item_bins` | POST | Populates "View Bins" modal for specific item. |
-| `/validate_bin` | POST | Checks if Item is in Bin. Returns `onhand` qty. |
-| `/process_batch_scan` | POST | Validates and (Simulates) saving the pick list. |
-
----
-
-## 📱 UI/UX Specifics (Zebra TC52)
-
-* **Inputs:** Large, high-contrast inputs for barcode scanners.
-* **Action Bar:** Buttons (View Scanned, Submit) are static inside the card (not fixed footer) to ensure visibility above on-screen keyboards.
-* **Visibility:**
-* "Picked Qty" input is 40px font size.
-* Flashes **Green** on successful Auto-Scan.
-* Review Modal uses high-contrast text.
-
-
-
----
-
-## 📝 Next Steps (To Resume)
-
-1. **Disable Simulation:** In `app.py` -> `process_batch_scan`, uncomment/enable the SQL `INSERT` into `ScanBinTran2` and `UPDATE` `SOTRAN`.
-2. **Transaction ID:** Ensure unique Transaction IDs if required by the ERP.
-3. **Inventory Decrement:** Currently, we update `SOTRAN` (Order). Decide if we also need to immediately `UPDATE ScanOnhand2` (Inventory) or if the ERP triggers handles that.
+| `/login` | POST | Authenticates user and detects DB columns. |
+| `/picking` | GET | Fetches SO lines filtered by User Location. |
+| `/get_item_bins` | POST | Returns available bins and stock for a specific item. |
+| `/validate_bin` | POST | Verifies if an item is in a scanned bin. |
+| `/process_batch_scan` | POST | Commits the entire pick list to the database. |
 
 ```
 
