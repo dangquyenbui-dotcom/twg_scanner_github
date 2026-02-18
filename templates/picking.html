@@ -16,17 +16,24 @@
     </div>
 
     {% if not so %}
-    <div class="tc52-layout" style="justify-content: center; align-items: center; background: #f7fafc;">
+    <div class="tc52-layout" style="justify-content: flex-start; align-items: center; background: #f7fafc; padding-top: 40px;">
         <div style="width: 100%; max-width: 320px; padding: 20px; text-align: center;">
             <div style="font-size: 40px; margin-bottom: 10px;">🏭</div>
             <h2 style="color: #2d3748; margin: 0 0 20px 0;">TWG PICKING</h2>
             
-            <form id="soForm" method="GET" action="/picking">
+            <form id="soForm" method="GET" action="/picking" novalidate>
                 <div class="input-wrapper" style="margin-bottom: 20px;">
-                    <input type="text" name="so" id="soInput" class="scan-input" 
-                           style="height: 50px; font-size: 20px; text-align: center;" 
-                           placeholder="Scan Order..." autocomplete="off" autofocus>
-                    <button type="button" class="btn-keyboard" style="height: 50px; width: 50px;" onclick="toggleKeyboard('soInput')">⌨</button>
+                    <input type="text" 
+                           name="so" 
+                           id="soInput" 
+                           class="scan-input" 
+                           style="height: 60px; font-size: 24px; text-align: center; border: 2px solid #2b6cb0;" 
+                           placeholder="Scan/Type SO" 
+                           autocomplete="off" 
+                           autofocus
+                           inputmode="numeric" 
+                           pattern="[0-9]*" 
+                           maxlength="7">
                 </div>
             </form>
             
@@ -39,7 +46,6 @@
 
     {% else %}
     <div class="tc52-layout">
-
         <div class="tc52-header">
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <span style="font-weight:800; color:#e53e3e; font-size: 16px;">TWG WMS</span>
@@ -80,7 +86,6 @@
         </div>
 
         <form class="tc52-controls" id="scanForm" onsubmit="return false;">
-            
             <div class="control-row" style="justify-content: space-between;">
                 <button type="button" id="btnViewBins" class="btn-small-action" onclick="openBinModal()" style="background:#4a5568;">🔍 Bins</button>
                 <div style="display:flex;">

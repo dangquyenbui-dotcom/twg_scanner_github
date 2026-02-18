@@ -1,6 +1,4 @@
-/* picking.js - Core Logic & Controller
- * Depends on: utils.js, picking-ui.js
- */
+/* picking.js - Core Logic & Controller */
 
 // --- STATE ---
 const SO_NUMBER = (typeof SERVER_DATA !== 'undefined' && SERVER_DATA.soNumber) ? SERVER_DATA.soNumber : ""; 
@@ -36,22 +34,47 @@ function attachScannerListeners() {
         let debounceTimer;
         el.addEventListener('keydown', (e) => { 
             if (e.key === 'Enter' || e.keyCode === 13) { 
-                e.preventDefault(); clearTimeout(debounceTimer); handleAction(el); 
+                e.preventDefault(); 
+                clearTimeout(debounceTimer); 
+                handleAction(el); 
             } 
         });
         el.addEventListener('input', () => { 
             clearTimeout(debounceTimer); 
+            
+            const val = el.value.trim();
+
+            // Strict 7-digit check for manual Sales Order entry
+            if (el.id === 'soInput') {
+                if (val.length === 7) {
+                    log("7 Digits Reached. Submitting SO...");
+                    handleAction(el);
+                }
+                return; 
+            }
+
+            // Logic for Bin and Item scanning with debounce to differentiate from typing
             debounceTimer = setTimeout(() => { 
-                if (el.value.length > 2) { log(`Auto: ${el.id}`); handleAction(el); } 
-            }, 150); 
+                if (val.length > 5) { 
+                    log(`Auto Scan Detected: ${el.id}`); 
+                    handleAction(el); 
+                } 
+            }, 300); 
         });
     });
 }
 
 function handleAction(el) {
-    if (el.value.trim() === "") return;
+    const val = el.value.trim();
+    if (val === "") return;
     unlockAudio();
-    if (el.id === 'soInput') document.getElementById('soForm').submit();
+    if (el.id === 'soInput') {
+        if (val.length === 7) {
+            document.getElementById('soForm').submit();
+        } else {
+            log("Submit blocked: SO must be 7 digits.");
+        }
+    }
     else if (el.id === 'binInput') validateBin();
     else if (el.id === 'itemInput') handleItemScan();
     else if (el.id === 'qtyInput') addToSession(); 
@@ -59,17 +82,14 @@ function handleAction(el) {
 
 // --- CORE LOGIC ---
 
-// Updated to accept UPC
 function selectRow(row, itemCode, remainingQty, lineNo, upc) {
     unlockAudio();
     document.querySelectorAll('.item-row').forEach(r => r.classList.remove('active-row'));
     row.classList.add('active-row');
     
-    // FIX: Aggressive Cleaning for Item and UPC
     selectedItemCode = itemCode ? itemCode.toString().trim() : ""; 
     selectedLineNo = lineNo; 
     
-    // FIX: Ensure 'None' string (from template leakage) or nulls are treated as empty
     if (!upc || upc === 'None' || upc === 'null') {
         selectedUpc = "";
     } else {
@@ -85,15 +105,12 @@ function selectRow(row, itemCode, remainingQty, lineNo, upc) {
     currentBinMaxQty = 999999; 
     setTimeout(() => safeFocus('binInput'), 100);
     prefetchBins(selectedItemCode); 
-    
-    if (selectedUpc) log(`Row Selected: ${selectedItemCode} (UPC: ${selectedUpc})`);
 }
 
 function validateBin() {
     const binVal = document.getElementById('binInput').value.trim();
     if(!binVal || !selectedItemCode) return;
     
-    // Cache check
     if (binCache[selectedItemCode]) {
         const f = binCache[selectedItemCode].find(b => b.bin === binVal);
         if (f) { verifySuccess(f.qty, binVal); return; }
@@ -123,14 +140,12 @@ function addToSession() {
     let qty = isAutoMode ? 1 : (parseFloat(document.getElementById('qtyInput').value)||0);
     if(qty <= 0) return;
 
-    // Logic Limits
     const currentLineTotal = sessionPicks.filter(p => p.lineNo === selectedLineNo).reduce((s,p) => s + p.qty, 0);
     const currentBinTotal = sessionPicks.filter(p => p.item === selectedItemCode && p.bin === currentBin).reduce((s,p) => s + p.qty, 0);
     
     if(currentBinTotal + qty > currentBinMaxQty) { showToast(`Bin Limit: ${currentBinMaxQty}`, 'error'); return; }
     if(currentLineTotal + qty > currentOrderMaxQty) { showToast(`Order Limit: ${currentOrderMaxQty}`, 'error'); return; }
 
-    // Success
     playBeep('success');
     const existingIndex = sessionPicks.findIndex(p => p.lineNo === selectedLineNo && p.bin === currentBin && p.item === selectedItemCode);
     
@@ -139,7 +154,6 @@ function addToSession() {
 
     updateSessionDisplay(sessionPicks);
     
-    // Visual Flash
     const q = document.getElementById('qtyInput');
     q.classList.remove('flash-active'); void q.offsetWidth; q.classList.add('flash-active');
     
@@ -166,10 +180,7 @@ function handleItemScan() {
     const itemNorm = (selectedItemCode || "").trim().toLowerCase();
     const upcNorm = selectedUpc ? selectedUpc.toLowerCase() : "";
 
-    // VALIDATION: Strict Match on Item Code OR Exact Match on UPC
-    const match = 
-        scanNorm === itemNorm || 
-        (upcNorm && scanNorm === upcNorm);
+    const match = scanNorm === itemNorm || (upcNorm && scanNorm === upcNorm);
     
     if(!match) {
         showToast("Wrong Item/UPC!", 'error'); 
@@ -184,11 +195,8 @@ function handleItemScan() {
 
 function submitFinal() {
     if(isSubmitting || sessionPicks.length===0) return;
-    
     if(!navigator.onLine) { alert("OFFLINE. Connect to Wi-Fi."); return; }
-    
-    // USER CONFIRMATION (Required)
-    if(!confirm(`CONFIRM SUBMISSION:\n\nAre you sure you want to commit ${sessionPicks.length} pick lines to the database?`)) return;
+    if(!confirm(`CONFIRM SUBMISSION:\n\nAre you sure you want to commit ${sessionPicks.length} pick lines?`)) return;
     
     isSubmitting = true;
     const btn = document.getElementById('btnSubmit'); 
@@ -202,11 +210,11 @@ function submitFinal() {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ so:SO_NUMBER, picks:sessionPicks, batch_id:batchId })
     })
-    .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+    .then(r => r.json())
     .then(d => {
         if(d.status === 'success') { 
-            playBeep('success'); // AUDIO CONFIRMATION
-            alert(d.msg); // VISUAL CONFIRMATION
+            playBeep('success'); 
+            alert(d.msg); 
             clearLocal(); 
             setTimeout(() => location.reload(), 1500); 
         } else { 
@@ -221,8 +229,6 @@ function submitFinal() {
 }
 
 function resetSubmitBtn(btn, txt) { isSubmitting=false; btn.innerHTML=txt; btn.disabled=false; }
-
-// --- STORAGE & MODES ---
 
 function saveToLocal() {
     if(!SO_NUMBER) return;
@@ -265,8 +271,6 @@ function updateMode() {
     }
 }
 
-// --- MODAL CONTROLLERS ---
-
 function openBinModal(){
     if(document.activeElement) document.activeElement.blur();
     if(!selectedItemCode) return;
@@ -304,8 +308,24 @@ function clearSession() {
 
 function toggleKeyboard(id) { 
     unlockAudio(); const el = document.getElementById(id); 
-    if(el.inputMode==='none') { el.inputMode='text'; el.blur(); setTimeout(()=>el.focus(),50); } 
+    if(el.inputMode==='none') { 
+        el.inputMode = (id === 'soInput') ? 'numeric' : 'text'; 
+        el.blur(); 
+        setTimeout(()=>el.focus(),50); 
+    } 
     else { el.inputMode='none'; el.blur(); } 
 }
-function safeFocus(id) { const el = document.getElementById(id); el.inputMode='none'; el.focus(); setTimeout(()=>el.inputMode='text',300); }
-function adjustQty(n) { if(!isAutoMode) { const i=document.getElementById('qtyInput'); i.value=Math.max(0, (parseFloat(i.value)||0)+n); } }
+
+function safeFocus(id) { 
+    const el = document.getElementById(id); 
+    el.inputMode='none'; 
+    el.focus(); 
+    setTimeout(()=>el.inputMode='text',300); 
+}
+
+function adjustQty(n) { 
+    if(!isAutoMode) { 
+        const i=document.getElementById('qtyInput'); 
+        i.value=Math.max(0, (parseFloat(i.value)||0)+n); 
+    } 
+}
