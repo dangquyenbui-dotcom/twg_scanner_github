@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="mobile-web-app-capable" content="yes">
     <title>Picking - {{ so }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
@@ -43,7 +43,7 @@
     </div>
 
     {% else %}
-    <div class="tc52-layout">
+    <div class="tc52-layout" id="mainLayout">
         <div class="tc52-header">
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <span style="font-weight:800; color:#e53e3e; font-size: 16px;">TWG WMS</span>

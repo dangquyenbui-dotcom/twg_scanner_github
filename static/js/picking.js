@@ -22,11 +22,32 @@ window.onload = function() {
     if(soInput) setTimeout(() => soInput.focus(), 200);
     
     attachScannerListeners();
+    attachKeyboardAvoidance();
     document.addEventListener('click', forceFullscreen, {once:true});
 };
 
 window.addEventListener('online', () => updateStatusUI(true));
 window.addEventListener('offline', () => updateStatusUI(false));
+
+// --- UI EXPERIENCE IMPROVEMENT ---
+function attachKeyboardAvoidance() {
+    const inputs = document.querySelectorAll('.tc52-controls input');
+    const layout = document.getElementById('mainLayout');
+
+    inputs.forEach(input => {
+        // ONLY trigger shift on actual click/touch to avoid aggressive shifts during auto-focus
+        input.addEventListener('mousedown', () => {
+            if (layout) layout.classList.add('keyboard-visible');
+        });
+        input.addEventListener('touchstart', () => {
+            if (layout) layout.classList.add('keyboard-visible');
+        });
+
+        input.addEventListener('blur', () => {
+            if (layout) layout.classList.remove('keyboard-visible');
+        });
+    });
+}
 
 // --- SCANNER LOGIC ---
 function attachScannerListeners() {
@@ -112,6 +133,7 @@ function selectRow(row, itemCode, remainingQty, lineNo, upc) {
     
     updateSessionDisplay(sessionPicks);
     currentBinMaxQty = 999999; 
+    // safeFocus focuses the input for hardware scanning but does NOT trigger keyboard layout shift
     setTimeout(() => safeFocus('binInput'), 100);
     prefetchBins(selectedItemCode); 
 }
