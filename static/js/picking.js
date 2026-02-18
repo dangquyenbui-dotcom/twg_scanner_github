@@ -29,6 +29,21 @@ window.addEventListener('online', () => updateStatusUI(true));
 window.addEventListener('offline', () => updateStatusUI(false));
 
 // --- SCANNER LOGIC ---
+
+/**
+ * Determines if the user is actively typing via a virtual (on-screen) keyboard.
+ * Hardware barcode scanners inject text with inputMode='none' or very rapidly,
+ * while virtual keyboard users will have inputMode set to 'text', 'numeric', etc.
+ * 
+ * When the virtual keyboard is active, we must NOT auto-trigger validation
+ * on the debounce timer — the user needs time to finish typing manually.
+ */
+function isVirtualKeyboardActive(el) {
+    // If inputMode is explicitly set to something other than 'none', 
+    // the user opened the virtual keyboard via toggleKeyboard().
+    return el.inputMode && el.inputMode !== 'none';
+}
+
 function attachScannerListeners() {
     document.querySelectorAll('input.scan-input').forEach(el => {
         let debounceTimer;
@@ -51,6 +66,15 @@ function attachScannerListeners() {
                     handleAction(el);
                 }
                 return; 
+            }
+
+            // --- FIX: Only auto-trigger if virtual keyboard is NOT active ---
+            // Hardware scanners inject text rapidly with inputMode='none'.
+            // If the user has the virtual keyboard open (inputMode='text'/'numeric'),
+            // we skip auto-trigger and let them press Enter when ready.
+            if (isVirtualKeyboardActive(el)) {
+                log(`Virtual keyboard active on ${el.id} — waiting for Enter key.`);
+                return;
             }
 
             debounceTimer = setTimeout(() => { 
