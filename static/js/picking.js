@@ -42,12 +42,15 @@ function attachScannerListeners() {
         el.addEventListener('input', () => { 
             clearTimeout(debounceTimer); 
             
-            const val = el.value.trim();
+            const rawVal = el.value;
+            const cleanVal = rawVal.trim();
 
-            // Strict 7-digit check for manual Sales Order entry
+            // Handle Sales Order entry logic
             if (el.id === 'soInput') {
-                if (val.length === 7) {
-                    log("7 Digits Reached. Submitting SO...");
+                // If the trimmed value is exactly 7, we submit.
+                // This covers both manual (1234567) and scanned (   1234567)
+                if (cleanVal.length === 7) {
+                    log("7-digit Sales Order detected. Processing...");
                     handleAction(el);
                 }
                 return; 
@@ -55,7 +58,7 @@ function attachScannerListeners() {
 
             // Logic for Bin and Item scanning with debounce to differentiate from typing
             debounceTimer = setTimeout(() => { 
-                if (val.length > 5) { 
+                if (cleanVal.length > 5) { 
                     log(`Auto Scan Detected: ${el.id}`); 
                     handleAction(el); 
                 } 
@@ -68,11 +71,14 @@ function handleAction(el) {
     const val = el.value.trim();
     if (val === "") return;
     unlockAudio();
+
     if (el.id === 'soInput') {
         if (val.length === 7) {
+            // Update the input value to the cleaned version before submitting
+            el.value = val;
             document.getElementById('soForm').submit();
         } else {
-            log("Submit blocked: SO must be 7 digits.");
+            log("Submit blocked: SO must be 7 digits (scanned or typed).");
         }
     }
     else if (el.id === 'binInput') validateBin();
