@@ -35,11 +35,9 @@ function attachKeyboardAvoidance() {
     const layout = document.getElementById('mainLayout');
 
     inputs.forEach(input => {
-        // Triggered when user manually taps the field
         const triggerShift = () => {
             if (layout) {
                 layout.classList.add('keyboard-visible');
-                // Force scroll to the bottom of the form so the input is visible
                 setTimeout(() => {
                     input.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 }, 100);
@@ -55,37 +53,53 @@ function attachKeyboardAvoidance() {
     });
 }
 
-// --- SCANNER LOGIC ---
+// --- REFINED SCANNER VS MANUAL LOGIC ---
 function attachScannerListeners() {
     document.querySelectorAll('input.scan-input').forEach(el => {
-        let debounceTimer;
+        let lastKeyTime = Date.now();
+        
         el.addEventListener('keydown', (e) => { 
+            const now = Date.now();
+            const diff = now - lastKeyTime;
+            lastKeyTime = now;
+
             if (e.key === 'Enter' || e.keyCode === 13) { 
                 e.preventDefault(); 
-                clearTimeout(debounceTimer); 
                 handleAction(el); 
-            } 
-        });
-        el.addEventListener('input', () => { 
-            clearTimeout(debounceTimer); 
-            
-            const rawVal = el.value;
-            const cleanVal = rawVal.trim();
-
-            if (el.id === 'soInput') {
-                if (cleanVal.length === 7) {
-                    log("7-digit Sales Order detected. Processing...");
-                    handleAction(el);
-                }
-                return; 
+                return;
             }
 
-            debounceTimer = setTimeout(() => { 
-                if (cleanVal.length > 5) { 
-                    log(`Auto Scan Detected: ${el.id}`); 
-                    handleAction(el); 
-                } 
-            }, 300); 
+            // Hardware scanners are extremely fast (< 10ms between keys)
+            // If the time since last key is high, we treat it as manual typing
+            // and clear any pending auto-lookup timers.
+            if (diff > 50) {
+                clearTimeout(el.scanTimeout);
+            }
+        });
+
+        el.addEventListener('input', () => { 
+            const val = el.value.trim();
+
+            // Special Case: SO Input auto-submits at 7 digits
+            if (el.id === 'soInput' && val.length === 7) {
+                handleAction(el);
+                return;
+            }
+
+            // For Bin and Item inputs:
+            // Only trigger auto-lookup if characters arrive in a rapid "burst" (Scanner)
+            // We use a very short timeout to catch the end of the scanner data dump
+            clearTimeout(el.scanTimeout);
+            if (val.length > 5) {
+                el.scanTimeout = setTimeout(() => {
+                    const timeSinceLastKey = Date.now() - lastKeyTime;
+                    // If the last character was received recently and rapidly, process it.
+                    if (timeSinceLastKey < 100) {
+                        log(`Auto-Scan triggered for: ${el.id}`);
+                        handleAction(el);
+                    }
+                }, 40); 
+            }
         });
     });
 }
@@ -100,7 +114,7 @@ function handleAction(el) {
             el.value = val;
             document.getElementById('soForm').submit();
         } else {
-            log("Submit blocked: SO must be 7 digits (scanned or typed).");
+            log("Submit blocked: SO must be 7 digits.");
         }
     }
     else if (el.id === 'binInput') validateBin();
@@ -109,7 +123,6 @@ function handleAction(el) {
 }
 
 // --- CORE LOGIC ---
-
 function selectRow(row, itemCode, remainingQty, lineNo, upc) {
     unlockAudio();
     document.querySelectorAll('.item-row').forEach(r => r.classList.remove('active-row'));
@@ -117,23 +130,14 @@ function selectRow(row, itemCode, remainingQty, lineNo, upc) {
     
     selectedItemCode = itemCode ? itemCode.toString().trim() : ""; 
     selectedLineNo = lineNo; 
-    
-    if (!upc || upc === 'None' || upc === 'null') {
-        selectedUpc = "";
-    } else {
-        selectedUpc = upc.toString().trim();
-    }
-    
+    selectedUpc = (!upc || upc === 'None' || upc === 'null') ? "" : upc.toString().trim();
     currentOrderMaxQty = remainingQty;
     
-    // --- ENABLE CONTROLS ON SELECTION ---
     document.querySelectorAll('.disabled-control').forEach(el => el.classList.remove('disabled-control'));
     document.getElementById('scanForm').querySelectorAll('input, button').forEach(el => el.disabled = false);
     
-    // Reset placeholders
     document.getElementById('binInput').placeholder = "Scan Bin...";
     document.getElementById('itemInput').placeholder = "Scan Item...";
-    
     document.getElementById('binInput').value = ''; 
     document.getElementById('itemInput').value = '';
     
@@ -189,13 +193,11 @@ function addToSession() {
     else sessionPicks.push({ id:Date.now(), lineNo:selectedLineNo, item:selectedItemCode, bin:currentBin, qty:qty });
 
     updateSessionDisplay(sessionPicks);
-    
     const q = document.getElementById('qtyInput');
     q.classList.remove('flash-active'); void q.offsetWidth; q.classList.add('flash-active');
     
     setTimeout(saveToLocal, 0);
     showToast(`Added ${qty} x ${selectedItemCode}`, 'success', false);
-    
     resetInputAfterAdd(qty > 0);
 }
 
@@ -273,7 +275,7 @@ function saveToLocal() {
 }
 
 function loadFromLocal() { 
-    const s = localStorage.getItem(`twpicks_${SO_NUMBER}`); 
+    const s = localStorage.getItem(`twg_picks_${SO_NUMBER}`); 
     if(s) try { sessionPicks = JSON.parse(s); } catch(e){} 
 }
 

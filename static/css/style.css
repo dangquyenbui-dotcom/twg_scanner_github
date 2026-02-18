@@ -14,8 +14,8 @@ html, body {
     margin: 0;
     padding: 0;
     width: 100%;
-    height: 100%; /* Force full height */
-    overflow: hidden; /* Prevent body scroll */
+    height: 100%;
+    overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     background-color: var(--bg-primary);
     -webkit-font-smoothing: antialiased;
@@ -29,27 +29,24 @@ html, body {
 /* --- TC52 FIXED LAYOUT CONTAINER --- */
 .tc52-layout {
     position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    top: 0; left: 0; right: 0; bottom: 0;
     display: flex;
     flex-direction: column;
     background: var(--bg-primary);
     z-index: 1;
-    transition: all 0.2s ease;
+    transition: all 0.15s ease-in-out;
 }
 
-/* KEYBOARD HANDLING: TRIGGERED VIA TOUCH ONLY */
+/* KEYBOARD HANDLING */
 .tc52-layout.keyboard-visible .tc52-header {
     display: none;
 }
 .tc52-layout.keyboard-visible .tc52-grid {
-    flex: 0 0 60px; /* Compress grid to make room for inputs */
+    flex: 0 0 60px;
     overflow-y: hidden;
 }
 .tc52-layout.keyboard-visible .tc52-controls {
-    flex: 1 1 auto; /* Allow controls to expand if needed */
+    flex: 1 1 auto;
 }
 
 /* --- HEADER --- */
@@ -72,7 +69,7 @@ html, body {
     border-bottom: 1px solid #ccc;
     -webkit-overflow-scrolling: touch;
     position: relative;
-    transition: flex 0.2s ease;
+    transition: flex 0.15s ease-in-out;
 }
 
 /* --- CONTROLS (Footer) --- */
