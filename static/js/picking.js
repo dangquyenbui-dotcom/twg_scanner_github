@@ -45,10 +45,7 @@ function attachScannerListeners() {
             const rawVal = el.value;
             const cleanVal = rawVal.trim();
 
-            // Handle Sales Order entry logic
             if (el.id === 'soInput') {
-                // If the trimmed value is exactly 7, we submit.
-                // This covers both manual (1234567) and scanned (   1234567)
                 if (cleanVal.length === 7) {
                     log("7-digit Sales Order detected. Processing...");
                     handleAction(el);
@@ -56,7 +53,6 @@ function attachScannerListeners() {
                 return; 
             }
 
-            // Logic for Bin and Item scanning with debounce to differentiate from typing
             debounceTimer = setTimeout(() => { 
                 if (cleanVal.length > 5) { 
                     log(`Auto Scan Detected: ${el.id}`); 
@@ -74,7 +70,6 @@ function handleAction(el) {
 
     if (el.id === 'soInput') {
         if (val.length === 7) {
-            // Update the input value to the cleaned version before submitting
             el.value = val;
             document.getElementById('soForm').submit();
         } else {
@@ -103,6 +98,14 @@ function selectRow(row, itemCode, remainingQty, lineNo, upc) {
     }
     
     currentOrderMaxQty = remainingQty;
+    
+    // --- ENABLE CONTROLS ON SELECTION ---
+    document.querySelectorAll('.disabled-control').forEach(el => el.classList.remove('disabled-control'));
+    document.getElementById('scanForm').querySelectorAll('input, button').forEach(el => el.disabled = false);
+    
+    // Reset placeholders
+    document.getElementById('binInput').placeholder = "Scan Bin...";
+    document.getElementById('itemInput').placeholder = "Scan Item...";
     
     document.getElementById('binInput').value = ''; 
     document.getElementById('itemInput').value = '';
@@ -268,7 +271,7 @@ function updateMode() {
         document.getElementById('btnMinus').classList.add('d-none'); 
         document.getElementById('btnPlus').classList.add('d-none'); 
         document.getElementById('addBtnContainer').classList.add('d-none');
-        if(currentBin) setTimeout(() => safeFocus('itemInput'), 100);
+        if(currentBin && !document.getElementById('itemInput').disabled) setTimeout(() => safeFocus('itemInput'), 100);
     } else {
         qtyInput.readOnly = false; 
         document.getElementById('btnMinus').classList.remove('d-none'); 
@@ -314,6 +317,7 @@ function clearSession() {
 
 function toggleKeyboard(id) { 
     unlockAudio(); const el = document.getElementById(id); 
+    if(el.disabled) return;
     if(el.inputMode==='none') { 
         el.inputMode = (id === 'soInput') ? 'numeric' : 'text'; 
         el.blur(); 
@@ -324,6 +328,7 @@ function toggleKeyboard(id) {
 
 function safeFocus(id) { 
     const el = document.getElementById(id); 
+    if(el.disabled) return;
     el.inputMode='none'; 
     el.focus(); 
     setTimeout(()=>el.inputMode='text',300); 

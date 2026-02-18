@@ -84,37 +84,37 @@
         </div>
 
         <form class="tc52-controls" id="scanForm" onsubmit="return false;">
-            <div class="control-row" style="justify-content: space-between;">
-                <button type="button" id="btnViewBins" class="btn-small-action" onclick="openBinModal()" style="background:#4a5568;">🔍 Bins</button>
+            <div class="control-row disabled-control" style="justify-content: space-between;">
+                <button type="button" id="btnViewBins" class="btn-small-action" onclick="openBinModal()" style="background:#4a5568;" disabled>🔍 Bins</button>
                 <div style="display:flex;">
-                    <label class="mode-label"><input type="radio" name="pickMode" value="auto" checked onchange="updateMode()"> Auto</label>
-                    <label class="mode-label"><input type="radio" name="pickMode" value="manual" onchange="updateMode()"> Manual</label>
+                    <label class="mode-label"><input type="radio" name="pickMode" value="auto" checked onchange="updateMode()" disabled> Auto</label>
+                    <label class="mode-label"><input type="radio" name="pickMode" value="manual" onchange="updateMode()" disabled> Manual</label>
                 </div>
             </div>
 
-            <div class="control-row">
+            <div class="control-row disabled-control">
                 <span class="control-label">Scan Bin</span>
                 <div class="input-wrapper">
-                    <input type="text" name="bin" id="binInput" class="scan-input" placeholder="Scan..." autocomplete="off">
-                    <button type="button" class="btn-keyboard" onclick="toggleKeyboard('binInput')">⌨</button>
+                    <input type="text" name="bin" id="binInput" class="scan-input" placeholder="Select item..." autocomplete="off" disabled>
+                    <button type="button" class="btn-keyboard" onclick="toggleKeyboard('binInput')" disabled>⌨</button>
                 </div>
             </div>
 
-            <div class="control-row">
+            <div class="control-row disabled-control">
                 <span class="control-label">Scan Item</span>
                 <div class="input-wrapper">
-                    <input type="text" name="item" id="itemInput" class="scan-input" placeholder="Scan..." autocomplete="off">
-                    <button type="button" class="btn-keyboard" onclick="toggleKeyboard('itemInput')">⌨</button>
+                    <input type="text" name="item" id="itemInput" class="scan-input" placeholder="Select item..." autocomplete="off" disabled>
+                    <button type="button" class="btn-keyboard" onclick="toggleKeyboard('itemInput')" disabled>⌨</button>
                 </div>
             </div>
 
-            <div class="control-row">
+            <div class="control-row disabled-control">
                 <span class="control-label">Pick Qty</span>
                 <div class="input-wrapper">
-                    <button type="button" id="btnMinus" class="btn-keyboard d-none" onclick="adjustQty(-1)" style="width:34px;">➖</button>
-                    <input type="number" id="qtyInput" class="scan-input text-center" value="1" style="font-weight:bold;" readonly>
-                    <button type="button" id="btnPlus" class="btn-keyboard d-none" onclick="adjustQty(1)" style="width:34px;">➕</button>
-                    <button type="button" id="addBtnContainer" class="btn-small-action d-none" onclick="addToSession()" style="background:#38a169; height:34px; margin-left:4px;">ADD</button>
+                    <button type="button" id="btnMinus" class="btn-keyboard d-none" onclick="adjustQty(-1)" style="width:34px;" disabled>➖</button>
+                    <input type="number" id="qtyInput" class="scan-input text-center" value="1" style="font-weight:bold;" readonly disabled>
+                    <button type="button" id="btnPlus" class="btn-keyboard d-none" onclick="adjustQty(1)" style="width:34px;" disabled>➕</button>
+                    <button type="button" id="addBtnContainer" class="btn-small-action d-none" onclick="addToSession()" style="background:#38a169; height:34px; margin-left:4px;" disabled>ADD</button>
                 </div>
             </div>
 

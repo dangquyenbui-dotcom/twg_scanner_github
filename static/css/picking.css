@@ -13,6 +13,13 @@
     transform: scale(1.2); 
 }
 
+/* IMPROVEMENT: GREY OUT STYLE */
+.disabled-control {
+    opacity: 0.5;
+    pointer-events: none;
+    filter: grayscale(100%);
+}
+
 #debugConsole { 
     display: none; 
     position: fixed; 
