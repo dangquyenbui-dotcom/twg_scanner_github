@@ -14,8 +14,8 @@ html, body {
     margin: 0;
     padding: 0;
     width: 100%;
-    height: 100%;
-    overflow: hidden;
+    height: 100%; /* Force full height */
+    overflow: hidden; /* Prevent body scroll */
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     background-color: var(--bg-primary);
     -webkit-font-smoothing: antialiased;
@@ -27,31 +27,22 @@ html, body {
 }
 
 /* --- TC52 FIXED LAYOUT CONTAINER --- */
+/* Using fixed positioning guarantees it fits the visible window exactly */
 .tc52-layout {
     position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
     display: flex;
     flex-direction: column;
     background: var(--bg-primary);
     z-index: 1;
-    transition: all 0.15s ease-in-out;
-}
-
-/* KEYBOARD HANDLING */
-.tc52-layout.keyboard-visible .tc52-header {
-    display: none;
-}
-.tc52-layout.keyboard-visible .tc52-grid {
-    flex: 0 0 60px;
-    overflow-y: hidden;
-}
-.tc52-layout.keyboard-visible .tc52-controls {
-    flex: 1 1 auto;
 }
 
 /* --- HEADER --- */
 .tc52-header {
-    flex: 0 0 auto;
+    flex: 0 0 auto; /* Fixed height */
     background: #fff;
     border-bottom: 2px solid #ccc;
     padding: 6px 10px;
@@ -63,24 +54,24 @@ html, body {
 
 /* --- GRID (Middle) --- */
 .tc52-grid {
-    flex: 1 1 auto;
-    overflow-y: auto;
+    flex: 1 1 auto; /* Takes all remaining space */
+    overflow-y: auto; /* Scroll ONLY here */
     background: #fff;
     border-bottom: 1px solid #ccc;
     -webkit-overflow-scrolling: touch;
     position: relative;
-    transition: flex 0.15s ease-in-out;
 }
 
 /* --- CONTROLS (Footer) --- */
 .tc52-controls {
-    flex: 0 0 auto;
+    flex: 0 0 auto; /* Fixed height */
     background: #f0f2f5;
     border-top: 1px solid #a0aec0;
-    padding: 6px 8px;
+    padding: 6px 8px; /* Compact padding */
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 4px; /* Tighter spacing */
+    /* Ensure it handles bottom safe areas on some devices */
     padding-bottom: max(6px, env(safe-area-inset-bottom)); 
 }
 
@@ -94,7 +85,7 @@ html, body {
 .control-label {
     font-weight: bold;
     font-size: 13px;
-    width: 70px;
+    width: 70px; /* Fixed label width */
     text-align: right;
     color: #4a5568;
     flex-shrink: 0;
@@ -109,9 +100,9 @@ html, body {
 
 input.scan-input {
     width: 100%;
-    height: 34px;
+    height: 34px; /* Touch-friendly but compact */
     padding: 0 8px;
-    font-size: 16px;
+    font-size: 16px; /* Prevents iOS/Android zoom */
     border: 1px solid #718096;
     border-radius: 4px;
     background: #fff;
@@ -149,7 +140,7 @@ input.scan-input:focus {
 
 .btn-footer {
     flex: 1;
-    height: 44px;
+    height: 44px; /* Large enough to hit, small enough to fit */
     border: none;
     border-radius: 4px;
     font-weight: bold;
@@ -181,12 +172,12 @@ input.scan-input:focus {
     z-index: 5; font-size: 11px; text-transform: uppercase;
 }
 .pick-table td {
-    padding: 10px 4px;
+    padding: 10px 4px; /* Easy to tap */
     border-bottom: 1px solid #e2e8f0;
     border-right: 1px solid #edf2f7;
     vertical-align: middle;
 }
-.active-row { background-color: #fefcbf !important; }
+.active-row { background-color: #fefcbf !important; /* Yellow highlight */ }
 .item-row.active-row td { border-bottom: 2px solid #d69e2e; }
 .picked-cell { font-weight: bold; font-size: 14px; }
 
