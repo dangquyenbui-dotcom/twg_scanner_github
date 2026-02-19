@@ -2,10 +2,11 @@
   "name": "TWG Warehouse",
   "short_name": "TWG WMS",
   "start_url": "/login",
-  "display": "standalone",
+  "display": "fullscreen",
   "orientation": "portrait",
   "background_color": "#f0f2f5",
-  "theme_color": "#3182ce",
+  "theme_color": "#2d3748",
+  "scope": "/",
   "icons": [
     {
       "src": "https://cdn-icons-png.flaticon.com/512/2821/2821868.png",

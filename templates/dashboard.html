@@ -1,9 +1,11 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <meta name="mobile-web-app-capable" content="yes">
-    <meta name="theme-color" content="#2b6cb0">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#2d3748">
     <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
     
     <title>TWG Dashboard</title>
@@ -16,6 +18,7 @@
             display: flex;
             flex-direction: column;
             height: 100vh;
+            height: 100dvh;
         }
 
         /* 1. TOP NAVIGATION */
@@ -160,9 +163,9 @@
         /* 5. FOOTER */
         .footer-bar {
             text-align: center;
-            padding: 30px 20px; /* Increased padding */
+            padding: 30px 20px;
             flex: 0 0 auto;
-            background: #fff; /* White background for footer */
+            background: #fff;
             border-top: 1px solid #e2e8f0;
         }
         
@@ -171,7 +174,7 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            padding: 12px 30px; /* Increased padding to prevent truncation */
+            padding: 12px 30px;
             background: white;
             border: 2px solid #e53e3e;
             color: #e53e3e;
@@ -182,7 +185,7 @@
             text-transform: uppercase;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             transition: all 0.2s ease;
-            white-space: nowrap; /* Keep text on one line */
+            white-space: nowrap;
             cursor: pointer;
         }
         .btn-footer-action:hover {
@@ -251,63 +254,44 @@
                 ⛶ Fullscreen
             </button>
         </div>
-        <div class="version-text">v1.6 • Connected</div>
+        <div class="version-text">v1.7 • Connected</div>
     </div>
 
+    <!-- Fullscreen management is handled by utils.js -->
+    <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
+
     <script>
-        // --- IMPROVED FULLSCREEN TOGGLE ---
-        const fsBtn = document.getElementById('fs-toggle-btn');
+        // --- FULLSCREEN TOGGLE BUTTON ---
+        var fsBtn = document.getElementById('fs-toggle-btn');
         
         function toggleFullscreen() {
-            const doc = window.document;
-            const docEl = doc.documentElement;
-
-            // Check if already in fullscreen
-            const fullscreenElement = doc.fullscreenElement || doc.mozFullScreenElement || doc.webkitFullscreenElement || doc.msFullscreenElement;
-
-            if (!fullscreenElement) {
-                // Enter Fullscreen
-                const requestFullScreen = docEl.requestFullscreen || docEl.mozRequestFullScreen || docEl.webkitRequestFullScreen || docEl.msRequestFullscreen;
-                if (requestFullScreen) {
-                    requestFullScreen.call(docEl).catch(err => {
-                        console.error(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
-                        alert("Fullscreen not supported or blocked by browser settings.");
-                    });
-                }
+            if (isFullscreen()) {
+                exitFullscreen();
             } else {
-                // Exit Fullscreen
-                const exitFullScreen = doc.exitFullscreen || doc.mozCancelFullScreen || doc.webkitExitFullscreen || doc.msExitFullscreen;
-                if (exitFullScreen) {
-                    exitFullScreen.call(doc).catch(err => {
-                         console.error(`Error attempting to exit full-screen mode: ${err.message} (${err.name})`);
-                    });
-                }
+                enterFullscreen();
             }
             updateFullscreenButtonText();
         }
 
         function updateFullscreenButtonText() {
-             const doc = window.document;
-             const isFullscreen = doc.fullscreenElement || doc.mozFullScreenElement || doc.webkitFullscreenElement || doc.msFullscreenElement;
-             fsBtn.innerHTML = isFullscreen ? "⛶ Exit Fullscreen" : "⛶ Fullscreen";
+            if (fsBtn) {
+                fsBtn.innerHTML = isFullscreen() ? "⛶ Exit Fullscreen" : "⛶ Fullscreen";
+            }
         }
 
         if (fsBtn) {
-            // Add click listener to the button
             fsBtn.addEventListener('click', toggleFullscreen);
-            // Update button text on load and on fullscreen change events
             updateFullscreenButtonText();
             ['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange', 'MSFullscreenChange'].forEach(
-                evt => document.addEventListener(evt, updateFullscreenButtonText)
+                function(evt) { document.addEventListener(evt, updateFullscreenButtonText); }
             );
         }
 
         // --- CLOCK LOGIC ---
         function updateClock() {
-            const now = new Date();
-            // Use 12-hour format with AM/PM for cleaner look
-            const timeString = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }); 
-            const dateString = now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+            var now = new Date();
+            var timeString = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }); 
+            var dateString = now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
             
             document.getElementById('timeDisplay').innerText = timeString;
             document.getElementById('dateDisplay').innerText = dateString;

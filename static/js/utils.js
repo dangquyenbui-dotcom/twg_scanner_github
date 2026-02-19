@@ -1,4 +1,4 @@
-/* utils.js - Generic Utilities (Audio, UUID, Logs, Device ID) */
+/* utils.js - Generic Utilities (Audio, UUID, Logs, Device ID, Fullscreen) */
 
 // --- UTILS ---
 function generateUUID() {
@@ -11,57 +11,141 @@ function generateUUID() {
     });
 }
 
-// NEW: Get or Create a Persistent Device ID
 function getDeviceId() {
-    let devId = localStorage.getItem('twg_device_id');
+    var devId = localStorage.getItem('twg_device_id');
     if (!devId) {
-        // Generate a pseudo-unique ID for this browser/device
-        const randomPart = Math.random().toString(36).substring(2, 10).toUpperCase();
-        devId = `TC52-${randomPart}`; 
+        var randomPart = Math.random().toString(36).substring(2, 10).toUpperCase();
+        devId = 'TC52-' + randomPart; 
         localStorage.setItem('twg_device_id', devId);
     }
     return devId;
 }
 
 function log(msg) {
-    const c = document.getElementById('debugConsole');
+    var c = document.getElementById('debugConsole');
     if(!c) return;
-    const d = document.createElement('div');
-    d.innerText = `[${new Date().toLocaleTimeString().split(' ')[0]}] ${msg}`; 
+    var d = document.createElement('div');
+    d.innerText = '[' + new Date().toLocaleTimeString().split(' ')[0] + '] ' + msg; 
     c.prepend(d); 
     console.log(msg);
 }
 
 function toggleDebug() {
-    const c = document.getElementById('debugConsole');
+    var c = document.getElementById('debugConsole');
     if(c) c.style.display = (c.style.display === 'none') ? 'block' : 'none';
 }
 
-function forceFullscreen() {
-    const doc = window.document; const docEl = doc.documentElement;
-    const req = docEl.requestFullscreen || docEl.mozRequestFullScreen || docEl.webkitRequestFullScreen || docEl.msRequestFullscreen;
-    if(!doc.fullscreenElement && !doc.mozFullScreenElement && !doc.webkitFullscreenElement && !doc.msFullscreenElement && req) {
-        req.call(docEl).catch(e=>{});
+
+// ============================================================
+// FULLSCREEN MANAGEMENT
+// ============================================================
+
+function isPWAStandalone() {
+    return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+           (window.matchMedia && window.matchMedia('(display-mode: fullscreen)').matches) ||
+           (window.navigator.standalone === true);
+}
+
+function isFullscreen() {
+    return !!(document.fullscreenElement || 
+              document.mozFullScreenElement || 
+              document.webkitFullscreenElement || 
+              document.msFullscreenElement);
+}
+
+function enterFullscreen() {
+    var docEl = document.documentElement;
+    var req = docEl.requestFullscreen || 
+              docEl.mozRequestFullScreen || 
+              docEl.webkitRequestFullScreen || 
+              docEl.msRequestFullscreen;
+    
+    if (req) {
+        return req.call(docEl).catch(function(e) {
+            console.warn("Fullscreen: Request denied -", e.message);
+        });
+    }
+    return Promise.resolve();
+}
+
+function exitFullscreen() {
+    var exitFn = document.exitFullscreen || 
+                 document.mozCancelFullScreen || 
+                 document.webkitExitFullscreen || 
+                 document.msExitFullscreen;
+    if (exitFn) {
+        exitFn.call(document).catch(function(e) {
+            console.warn("Fullscreen: Exit failed -", e.message);
+        });
     }
 }
 
-// --- AUDIO ENGINE ---
-const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+/**
+ * Silently enters fullscreen on the next user interaction.
+ * Called on page load and whenever fullscreen is accidentally exited.
+ */
+function autoEnterFullscreen() {
+    if (isPWAStandalone() || isFullscreen()) return;
 
-function unlockAudio() { 
-    if (audioCtx.state === 'suspended') audioCtx.resume().then(() => log("Audio Resumed")); 
+    function tryEnter() {
+        if (!isFullscreen() && !isPWAStandalone()) {
+            enterFullscreen();
+        }
+    }
+
+    // Browsers require a user gesture — attach to first touch/click
+    document.addEventListener('touchstart', tryEnter, { once: true, passive: true });
+    document.addEventListener('click', tryEnter, { once: true });
 }
 
-// Auto-bind audio unlock
-['touchstart', 'click', 'keydown', 'mousedown'].forEach(evt => {
+/**
+ * Re-enter fullscreen if the user accidentally exits (swipe, etc.).
+ */
+function watchFullscreenExit() {
+    ['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange', 'MSFullscreenChange'].forEach(function(evt) {
+        document.addEventListener(evt, function() {
+            if (!isFullscreen() && !isPWAStandalone()) {
+                autoEnterFullscreen();
+            }
+        });
+    });
+}
+
+/** Legacy compat */
+function forceFullscreen() {
+    if (!isFullscreen() && !isPWAStandalone()) {
+        enterFullscreen();
+    }
+}
+
+// --- Initialize: go fullscreen on first interaction, re-enter if exited ---
+document.addEventListener('DOMContentLoaded', function() {
+    autoEnterFullscreen();
+    watchFullscreenExit();
+});
+
+
+// ============================================================
+// AUDIO ENGINE
+// ============================================================
+
+var audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+function unlockAudio() { 
+    if (audioCtx.state === 'suspended') audioCtx.resume().then(function() { 
+        if (typeof log === 'function') log("Audio Resumed"); 
+    }); 
+}
+
+['touchstart', 'click', 'keydown', 'mousedown'].forEach(function(evt) {
     document.body.addEventListener(evt, unlockAudio, {once:false, passive:true});
 });
 
 function playBeep(type) {
     try {
         if (audioCtx.state === 'suspended') audioCtx.resume();
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
+        var osc = audioCtx.createOscillator();
+        var gain = audioCtx.createGain();
         osc.connect(gain); gain.connect(audioCtx.destination);
         
         if (type === 'success') { 

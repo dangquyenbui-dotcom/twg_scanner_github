@@ -3,6 +3,10 @@
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#2d3748">
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
     <title>Picking - {{ so }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/picking.css') }}">
@@ -164,7 +168,7 @@
     <div id="debugConsole"></div>
 
     <script>
-        const SERVER_DATA = {
+        var SERVER_DATA = {
             soNumber: "{{ so|default('', true) }}"
         };
     </script>
@@ -176,22 +180,21 @@
     <!-- KEYBOARD-AWARE VIEWPORT HANDLER -->
     <script>
     (function() {
-        const layout = document.getElementById('tc52Layout');
+        var layout = document.getElementById('tc52Layout');
         if (!layout) return; // Only run on the picking screen with SO loaded
 
-        const contextBar = document.getElementById('keyboardContextBar');
-        let keyboardOpen = false;
-        let originalHeight = window.innerHeight;
+        var contextBar = document.getElementById('keyboardContextBar');
+        var keyboardOpen = false;
+        var originalHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
 
         /**
          * Updates the context bar text with the currently selected item info.
-         * Called whenever keyboard state changes or a row is selected.
          */
         function updateContextBar() {
             if (!contextBar) return;
             if (typeof selectedItemCode !== 'undefined' && selectedItemCode) {
-                const binVal = document.getElementById('binInput') ? document.getElementById('binInput').value.trim() : '';
-                let info = '▶ Item: ' + selectedItemCode;
+                var binVal = document.getElementById('binInput') ? document.getElementById('binInput').value.trim() : '';
+                var info = '▶ Item: ' + selectedItemCode;
                 if (typeof currentOrderMaxQty !== 'undefined') info += '  |  Need: ' + currentOrderMaxQty;
                 if (binVal && typeof currentBin !== 'undefined' && currentBin) info += '  |  Bin: ' + currentBin;
                 contextBar.querySelector('#contextItemInfo').textContent = info;
@@ -205,36 +208,32 @@
          * and adjusts the fixed layout height so controls stay visible.
          */
         function handleViewportResize() {
-            let viewportHeight;
+            var viewportHeight;
+            var offsetTop = 0;
 
             if (window.visualViewport) {
                 viewportHeight = window.visualViewport.height;
+                offsetTop = window.visualViewport.offsetTop;
             } else {
                 viewportHeight = window.innerHeight;
             }
 
-            // Keyboard is considered "open" if viewport shrinks by more than 100px
-            const heightDiff = originalHeight - viewportHeight;
-            const isKeyboardNow = heightDiff > 100;
+            // Keyboard is considered "open" if viewport shrinks by more than 80px
+            // (lowered threshold to catch address bar + keyboard combo)
+            var heightDiff = originalHeight - viewportHeight;
+            var isKeyboardNow = heightDiff > 80;
 
             if (isKeyboardNow && !keyboardOpen) {
-                // Keyboard just opened
                 keyboardOpen = true;
                 layout.classList.add('keyboard-open');
                 updateContextBar();
             } else if (!isKeyboardNow && keyboardOpen) {
-                // Keyboard just closed
                 keyboardOpen = false;
                 layout.classList.remove('keyboard-open');
             }
 
             if (isKeyboardNow) {
-                // Resize the layout to fit exactly within the visible viewport
-                // This pushes the controls above the keyboard
-                let offsetTop = 0;
-                if (window.visualViewport) {
-                    offsetTop = window.visualViewport.offsetTop;
-                }
+                // Resize layout to fit exactly within the visible viewport
                 layout.style.height = viewportHeight + 'px';
                 layout.style.top = offsetTop + 'px';
                 layout.style.bottom = 'auto';
@@ -254,17 +253,15 @@
 
         // Fallback for browsers without visualViewport
         window.addEventListener('resize', function() {
-            // Update original height only when keyboard is NOT open
             if (!keyboardOpen) {
-                originalHeight = window.innerHeight;
+                originalHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
             }
             handleViewportResize();
         });
 
-        // Also update context bar whenever a control input gets focus
+        // Update context bar and viewport when control inputs get focus
         document.querySelectorAll('#scanForm input.scan-input').forEach(function(el) {
             el.addEventListener('focus', function() {
-                // Small delay to let the keyboard animation finish
                 setTimeout(function() {
                     updateContextBar();
                     handleViewportResize();
@@ -272,7 +269,6 @@
             });
 
             el.addEventListener('blur', function() {
-                // When all inputs lose focus, keyboard may close
                 setTimeout(function() {
                     handleViewportResize();
                 }, 300);
@@ -282,9 +278,19 @@
         // Track orientation changes to reset baseline height
         window.addEventListener('orientationchange', function() {
             setTimeout(function() {
-                originalHeight = window.innerHeight;
+                originalHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
                 handleViewportResize();
             }, 500);
+        });
+
+        // Recalculate baseline after fullscreen changes
+        ['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange', 'MSFullscreenChange'].forEach(function(evt) {
+            document.addEventListener(evt, function() {
+                setTimeout(function() {
+                    originalHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+                    handleViewportResize();
+                }, 300);
+            });
         });
 
         // Expose updateContextBar so picking.js selectRow can call it

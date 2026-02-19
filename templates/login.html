@@ -1,10 +1,11 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="theme-color" content="#3182ce">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#2d3748">
     <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
     
     <title>TWG Warehouse</title>
@@ -26,16 +27,9 @@
         }
         .alert { padding: 10px; margin-bottom: 15px; border-radius: 5px; }
         .alert-error { background: #ffebee; color: #c62828; }
-        
-        /* Fullscreen Helper */
-        #fs-btn {
-            position: fixed; bottom: 10px; right: 10px; opacity: 0.3;
-            background: #000; color: #fff; border: none; padding: 5px; font-size: 10px;
-        }
     </style>
 </head>
 <body>
-    <button id="fs-btn" onclick="forceFullscreen()">⛶</button>
 
     <div class="login-container">
         <h2 style="text-align: center; color: #333;">🏭 TWG Scanner</h2>
@@ -64,32 +58,24 @@
             <button type="submit" class="btn-login">LOGIN</button>
         </form>
         <div style="text-align:center; font-size:11px; color:#aaa; margin-top:20px;">
-            v1.3 - Tap screen to Fullscreen
+            v1.7 - Full Screen Mode
         </div>
     </div>
 
+    <!-- Fullscreen management is handled by utils.js -->
+    <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
+    
     <script>
-        // --- UNIVERSAL FULLSCREEN TRIGGER ---
-        function forceFullscreen() {
-            const doc = window.document;
-            const docEl = doc.documentElement;
-            const requestFullScreen = docEl.requestFullscreen || docEl.mozRequestFullScreen || docEl.webkitRequestFullScreen || docEl.msRequestFullscreen;
-            if(!doc.fullscreenElement && !doc.mozFullScreenElement && !doc.webkitFullscreenElement && !doc.msFullscreenElement) {
-                if(requestFullScreen) requestFullScreen.call(docEl).catch(e=>{});
-            }
-        }
-        // Attempt on any touch/click
-        document.addEventListener('click', forceFullscreen, {once:true});
-        document.addEventListener('touchstart', forceFullscreen, {once:true});
-        
         // Initial Focus Logic
-        document.addEventListener('DOMContentLoaded', () => {
-            const userInput = document.getElementById('userInput');
+        document.addEventListener('DOMContentLoaded', function() {
+            var userInput = document.getElementById('userInput');
             if(userInput) {
-                setTimeout(() => userInput.focus(), 500);
+                setTimeout(function() { userInput.focus(); }, 500);
                 userInput.addEventListener('click', function() {
                     if (this.inputMode === 'none') {
-                        this.inputMode = 'text'; this.blur(); setTimeout(() => this.focus(), 50); 
+                        this.inputMode = 'text'; this.blur(); 
+                        var self = this;
+                        setTimeout(function() { self.focus(); }, 50); 
                     }
                 });
             }
