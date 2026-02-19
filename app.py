@@ -87,6 +87,22 @@ def detect_columns():
     finally:
         conn.close()
 
+
+def is_valid_bin(bin_value):
+    """
+    Validates a bin value:
+    - Must be exactly 15 characters long
+    - The 5th character (index 4) must be numeric (0-9)
+    Example valid:   '000-10-00-00-00' (15 chars, 5th char '1' is numeric)
+    Example invalid: '000-PK-0-0'     (10 chars, 5th char 'P' is not numeric)
+    """
+    if not bin_value or len(bin_value) != 15:
+        return False
+    if not bin_value[4].isdigit():
+        return False
+    return True
+
+
 # --- ROUTES ---
 
 @app.route('/health')
@@ -293,6 +309,11 @@ def get_item_bins():
             # --- FIX: SAFE STRING HANDLING ---
             bin_val = (r.get('bin') or '').strip()
             loc_val = (r.get(loc_col) or '').strip()
+
+            # --- BIN FILTER: Only include bins that are exactly 15 chars
+            #     and have a numeric 5th character ---
+            if not is_valid_bin(bin_val):
+                continue
 
             bins.append({
                 'bin': bin_val,
