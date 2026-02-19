@@ -126,6 +126,9 @@ function selectRow(row, itemCode, remainingQty, lineNo, upc) {
     document.getElementById('binInput').value = ''; 
     document.getElementById('itemInput').value = '';
     
+    // Hide UPC badge on new row selection
+    hideUpcBadge();
+    
     updateSessionDisplay(sessionPicks);
     currentBinMaxQty = 999999; 
     setTimeout(() => safeFocus('binInput'), 100);
@@ -201,6 +204,9 @@ function addToSession() {
 function resetInputAfterAdd(success) {
     if(isAutoMode) {
         document.getElementById('itemInput').value = '';
+        // NOTE: Do NOT hide UPC badge here — let it stay visible so the picker
+        // can see the translation confirmation. It will hide on the next scan
+        // cycle (new input into itemInput, row change, or mismatch).
         setTimeout(() => safeFocus('itemInput'), 50);
     } else if(success) {
         document.getElementById('qtyInput').value = 1;
@@ -215,18 +221,66 @@ function handleItemScan() {
     const itemNorm = (selectedItemCode || "").trim().toLowerCase();
     const upcNorm = selectedUpc ? selectedUpc.toLowerCase() : "";
 
-    const match = scanNorm === itemNorm || (upcNorm && scanNorm === upcNorm);
+    const isDirectMatch = (scanNorm === itemNorm);
+    const isUpcMatch = (upcNorm && scanNorm === upcNorm);
+    const match = isDirectMatch || isUpcMatch;
     
     if(!match) {
         showToast("Wrong Item/UPC!", 'error'); 
         document.getElementById('itemInput').value=''; 
+        hideUpcBadge();
         if(isAutoMode) setTimeout(() => safeFocus('itemInput'), 50);
         return;
+    }
+    
+    // Show UPC translation badge if matched via UPC (not direct item code)
+    if (isUpcMatch && !isDirectMatch) {
+        showUpcBadge(scan, selectedItemCode);
+    } else {
+        hideUpcBadge();
     }
     
     if (isAutoMode) addToSession();
     else document.getElementById('qtyInput').focus();
 }
+
+// --- UPC TRANSLATION BADGE ---
+
+function showUpcBadge(upcValue, itemCode) {
+    var badge = document.getElementById('upcBadge');
+    if (!badge) return;
+    
+    var upcText = document.getElementById('upcBadgeText');
+    if (upcText) {
+        upcText.innerHTML = '<span class="upc-badge-label">UPC</span> ' + 
+            escapeHtml(upcValue) + 
+            ' <span class="upc-badge-arrow">\u2192</span> ' + 
+            '<strong>' + escapeHtml(itemCode) + '</strong>' +
+            ' <span class="upc-badge-check">\u2713</span>';
+    }
+    
+    // Force reflow so transition plays even if already visible
+    badge.classList.remove('upc-badge-visible');
+    badge.classList.add('upc-badge-hidden');
+    void badge.offsetWidth;
+    badge.classList.remove('upc-badge-hidden');
+    badge.classList.add('upc-badge-visible');
+}
+
+function hideUpcBadge() {
+    var badge = document.getElementById('upcBadge');
+    if (!badge) return;
+    badge.classList.remove('upc-badge-visible');
+    badge.classList.add('upc-badge-hidden');
+}
+
+function escapeHtml(str) {
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(str));
+    return div.innerHTML;
+}
+
+// --- END UPC BADGE ---
 
 function submitFinal() {
     if(isSubmitting || sessionPicks.length===0) return;
