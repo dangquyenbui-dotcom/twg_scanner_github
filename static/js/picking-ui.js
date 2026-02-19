@@ -98,13 +98,30 @@ function renderBinList(bins) {
 
 function renderReviewList(sessionPicks) {
     const l = document.getElementById('reviewList'); 
-    const htmlParts = sessionPicks.map((p, i) => `
+
+    const htmlParts = sessionPicks.map((p, i) => {
+        // Determine mode badge styling
+        var modeLabel = p.mode || '—';
+        var modeBg, modeColor;
+        if (modeLabel === 'Auto') {
+            modeBg = '#ebf8ff'; modeColor = '#2b6cb0'; // blue tones
+        } else if (modeLabel === 'Manual') {
+            modeBg = '#fefcbf'; modeColor = '#975a16'; // yellow/amber tones
+        } else {
+            modeBg = '#edf2f7'; modeColor = '#718096'; // grey fallback for old data
+        }
+
+        return `
         <tr>
             <td>${p.item}</td>
             <td>${p.bin}</td>
             <td style="font-weight:bold;">${p.qty}</td>
+            <td style="text-align:center;">
+                <span style="display:inline-block; background:${modeBg}; color:${modeColor}; font-size:10px; font-weight:700; padding:2px 6px; border-radius:3px; letter-spacing:0.3px;">${modeLabel}</span>
+            </td>
             <td><button class="btn-small-action" style="background:#e53e3e; padding: 2px 8px;" onclick="removePick(${i})">X</button></td>
-        </tr>`);
+        </tr>`;
+    });
     
     l.innerHTML = htmlParts.join('');
     document.getElementById('emptyReview').style.display = sessionPicks.length ? 'none' : 'block'; 
