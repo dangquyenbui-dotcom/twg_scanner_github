@@ -5,68 +5,198 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="theme-color" content="#2d3748">
+    <meta name="theme-color" content="#1a202c">
     <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
     
     <title>TWG Warehouse</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     
     <style>
-        body { background-color: #f0f2f5; font-family: sans-serif; }
-        .login-container { 
-            max-width: 350px; margin: 40px auto; padding: 20px; 
-            background: white; border-radius: 10px; 
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
+        body {
+            background: #1a202c;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            height: 100dvh;
+            margin: 0;
+            padding: 16px;
         }
-        .form-group { margin-bottom: 20px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; }
-        .btn-login { 
-            width: 100%; padding: 15px; font-size: 18px; 
-            background: #007bff; color: white; border: none; 
-            border-radius: 5px; cursor: pointer; 
+
+        .login-card {
+            width: 100%;
+            max-width: 340px;
+            background: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+            overflow: hidden;
         }
-        .alert { padding: 10px; margin-bottom: 15px; border-radius: 5px; }
-        .alert-error { background: #ffebee; color: #c62828; }
+
+        /* Top branding section */
+        .login-brand {
+            background: linear-gradient(135deg, #1a202c 0%, #2d3748 100%);
+            padding: 28px 20px 22px;
+            text-align: center;
+        }
+        .login-brand img {
+            height: 48px;
+            margin-bottom: 10px;
+        }
+        .login-brand-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: #a0aec0;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin: 0;
+        }
+
+        /* Form section */
+        .login-body {
+            padding: 24px 24px 20px;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 700;
+            font-size: 11px;
+            color: #4a5568;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+        }
+        .form-group .scan-input {
+            width: 100%;
+            height: 44px;
+            padding: 0 12px;
+            font-size: 16px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            background: #f7fafc;
+            transition: border-color 0.15s, background 0.15s;
+        }
+        .form-group .scan-input:focus {
+            border-color: #2d3748;
+            background: #fff;
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(45, 55, 72, 0.1);
+        }
+
+        .btn-login {
+            width: 100%;
+            padding: 14px;
+            font-size: 15px;
+            font-weight: 800;
+            background: #1a202c;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            transition: background 0.15s;
+            margin-top: 4px;
+        }
+        .btn-login:active {
+            background: #2d3748;
+        }
+
+        /* Alert */
+        .alert {
+            padding: 10px 12px;
+            margin-bottom: 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .alert-error {
+            background: #fff5f5;
+            color: #c53030;
+            border: 1px solid #feb2b2;
+        }
+
+        /* Footer warning */
+        .login-footer {
+            border-top: 1px solid #edf2f7;
+            padding: 14px 20px;
+            text-align: center;
+            background: #f7fafc;
+        }
+        .login-warning {
+            font-size: 9.5px;
+            color: #a0aec0;
+            line-height: 1.5;
+            letter-spacing: 0.2px;
+            margin: 0;
+        }
+        .login-warning strong {
+            color: #718096;
+        }
+
+        /* Version below the card */
+        .version-tag {
+            margin-top: 20px;
+            font-size: 10px;
+            color: #4a5568;
+            letter-spacing: 0.5px;
+        }
     </style>
 </head>
 <body>
 
-    <div class="login-container">
-        <h2 style="text-align: center; color: #333;">🏭 TWG Scanner</h2>
-        
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ category }}">{{ message }}</div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
+    <div class="login-card">
+        <div class="login-brand">
+            <img src="{{ url_for('static', filename='logo/twg.png') }}" alt="TWG">
+            <p class="login-brand-title">Warehouse Management</p>
+        </div>
 
-        <form method="POST">
-            <div class="form-group">
-                <label>User ID</label>
-                <input type="text" name="userid" id="userInput" class="scan-input" 
-                       placeholder="Enter ID" 
-                       autofocus required autocomplete="off">
-            </div>
-            
-            <div class="form-group">
-                <label>Password</label>
-                <input type="password" name="password" class="scan-input" placeholder="Enter Password" required>
-            </div>
+        <div class="login-body">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ category }}">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
 
-            <button type="submit" class="btn-login">LOGIN</button>
-        </form>
-        <div style="text-align:center; font-size:11px; color:#aaa; margin-top:20px;">
-            v1.7 - Full Screen Mode
+            <form method="POST">
+                <div class="form-group">
+                    <label>User ID</label>
+                    <input type="text" name="userid" id="userInput" class="scan-input" 
+                           placeholder="Enter your ID" 
+                           autofocus required autocomplete="off">
+                </div>
+                
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" name="password" class="scan-input" 
+                           placeholder="Enter password" required>
+                </div>
+
+                <button type="submit" class="btn-login">Sign In</button>
+            </form>
+        </div>
+
+        <div class="login-footer">
+            <p class="login-warning">
+                <strong>AUTHORIZED PERSONNEL ONLY</strong><br>
+                This system is the property of TWG and is restricted to authorized warehouse staff. 
+                Unauthorized access or misuse is strictly prohibited and may result in disciplinary action and prosecution.
+            </p>
         </div>
     </div>
+
+    <div class="version-tag">v1.7</div>
 
     <!-- Fullscreen management is handled by utils.js -->
     <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
     
     <script>
-        // Initial Focus Logic
         document.addEventListener('DOMContentLoaded', function() {
             var userInput = document.getElementById('userInput');
             if(userInput) {
