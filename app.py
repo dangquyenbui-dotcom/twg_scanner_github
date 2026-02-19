@@ -177,7 +177,7 @@ def picking_menu():
             base_sql = f"""
                 SELECT tranlineno, item, qtyord, shipqty, (qtyord - shipqty) as remaining, loctid 
                 FROM {Config.DB_ORDERS}.dbo.SOTRAN 
-                WHERE sono=? AND qtyord > shipqty
+                WHERE sono=? AND qtyord > shipqty AND stkcode = 'Y'
             """
             params = [resolved_so]
             
