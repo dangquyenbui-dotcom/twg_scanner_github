@@ -200,7 +200,7 @@ def picking_menu():
                 base_sql += " AND loctid LIKE ?"
                 params.append(f"{user_loc}%")
                 
-            base_sql += " ORDER BY item ASC, tranlineno ASC"
+            base_sql += " ORDER BY tranlineno ASC"
             
             cursor.execute(base_sql, tuple(params))
             rows = cursor.fetchall()
