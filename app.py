@@ -276,7 +276,7 @@ def get_item_bins():
             sql += f" AND {loc_col} LIKE ?"
             params.append(f"{user_loc}%")
         
-        sql += " ORDER BY bin ASC"
+        sql += f" ORDER BY (onhand - ISNULL({alloc_col}, 0)) ASC"
         
         cursor.execute(sql, tuple(params))
         rows = cursor.fetchall()
