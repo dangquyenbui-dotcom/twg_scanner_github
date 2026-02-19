@@ -53,29 +53,6 @@ function isFullscreen() {
               document.msFullscreenElement);
 }
 
-/**
- * Checks if the currently focused element is a text input, password field,
- * textarea, or any other element that would trigger a virtual keyboard.
- * When such an element is focused, we must NOT force fullscreen because
- * doing so will dismiss or block the virtual keyboard on mobile devices.
- */
-function isInputFocused() {
-    var el = document.activeElement;
-    if (!el) return false;
-    var tag = el.tagName.toLowerCase();
-    if (tag === 'textarea') return true;
-    if (tag === 'select') return true;
-    if (tag === 'input') {
-        var type = (el.type || '').toLowerCase();
-        // These input types trigger a virtual keyboard
-        var keyboardTypes = ['text', 'password', 'email', 'number', 'search', 'tel', 'url', 'numeric'];
-        return keyboardTypes.indexOf(type) !== -1;
-    }
-    // contenteditable elements also trigger keyboards
-    if (el.isContentEditable) return true;
-    return false;
-}
-
 function enterFullscreen() {
     var docEl = document.documentElement;
     var req = docEl.requestFullscreen || 
@@ -104,16 +81,13 @@ function exitFullscreen() {
 }
 
 /**
- * Silently enters fullscreen on the next user interaction,
- * BUT only if no input field is currently focused (to avoid blocking the virtual keyboard).
+ * Silently enters fullscreen on the next user interaction.
  * Called on page load and whenever fullscreen is accidentally exited.
  */
 function autoEnterFullscreen() {
     if (isPWAStandalone() || isFullscreen()) return;
 
     function tryEnter() {
-        // CRITICAL: Do NOT enter fullscreen if an input is focused — it kills the virtual keyboard
-        if (isInputFocused()) return;
         if (!isFullscreen() && !isPWAStandalone()) {
             enterFullscreen();
         }
@@ -125,15 +99,12 @@ function autoEnterFullscreen() {
 }
 
 /**
- * Re-enter fullscreen if the user accidentally exits (swipe, etc.),
- * but NOT if an input field is focused (keyboard is open).
+ * Re-enter fullscreen if the user accidentally exits (swipe, etc.).
  */
 function watchFullscreenExit() {
     ['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange', 'MSFullscreenChange'].forEach(function(evt) {
         document.addEventListener(evt, function() {
             if (!isFullscreen() && !isPWAStandalone()) {
-                // Don't immediately re-enter if an input is focused (keyboard caused the exit)
-                if (isInputFocused()) return;
                 autoEnterFullscreen();
             }
         });
@@ -142,8 +113,6 @@ function watchFullscreenExit() {
 
 /** Legacy compat */
 function forceFullscreen() {
-    // Respect input focus — don't force fullscreen when keyboard should be open
-    if (isInputFocused()) return;
     if (!isFullscreen() && !isPWAStandalone()) {
         enterFullscreen();
     }

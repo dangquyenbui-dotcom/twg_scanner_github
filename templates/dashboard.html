@@ -5,7 +5,7 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="theme-color" content="#1a202c">
+    <meta name="theme-color" content="#2d3748">
     <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
     
     <title>TWG Dashboard</title>
@@ -14,7 +14,7 @@
     <style>
         /* DASHBOARD SPECIFIC STYLES */
         body {
-            background-color: #f4f6f9;
+            background-color: #f4f7fa;
             display: flex;
             flex-direction: column;
             height: 100vh;
@@ -23,216 +23,187 @@
 
         /* 1. TOP NAVIGATION */
         .nav-bar {
-            background: #1a202c;
-            padding: 10px 16px;
+            background: #fff;
+            padding: 15px 20px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
             flex: 0 0 auto;
         }
 
-        .brand-logo {
-            height: 36px;
-            width: auto;
-            display: block;
+        /* UPDATED BRAND TITLE STYLE */
+        .brand-title {
+            font-size: 24px;
+            font-weight: 900;
+            color: #ff5722; /* TWG Orange */
+            letter-spacing: 1px;
+            /* Create the black outline effect */
+            text-shadow:
+                 2px  2px 0 #000,
+                -1px -1px 0 #000,  
+                 1px -1px 0 #000,
+                -1px  1px 0 #000,
+                 1px  1px 0 #000;
+            background: #2d3748; /* Dark background like the logo */
+            padding: 5px 15px;
+            border-radius: 8px;
+            display: inline-block;
         }
 
         .user-info {
             text-align: right;
         }
         .user-id {
-            font-weight: 700;
-            color: #fff;
-            font-size: 13px;
+            font-weight: bold;
+            color: #2d3748;
+            font-size: 14px;
             display: block;
-            letter-spacing: 0.3px;
         }
         .user-loc {
-            font-size: 10px;
-            color: #a0aec0;
+            font-size: 11px;
+            color: #718096;
             text-transform: uppercase;
-            font-weight: 600;
-            letter-spacing: 0.5px;
+            font-weight: bold;
         }
 
         /* 2. MAIN CONTENT AREA */
         .main-content {
             flex: 1;
-            padding: 16px;
+            padding: 20px;
             display: flex;
             flex-direction: column;
-            gap: 16px;
+            gap: 20px;
             overflow-y: auto;
         }
 
         /* 3. HERO WIDGET (Clock) */
         .hero-card {
-            background: linear-gradient(135deg, #1a202c 0%, #2d3748 50%, #4a5568 100%);
-            border-radius: 14px;
-            padding: 22px 20px;
+            background: linear-gradient(135deg, #2b6cb0 0%, #2c5282 100%);
+            border-radius: 12px;
+            padding: 25px;
             text-align: center;
             color: white;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            box-shadow: 0 4px 6px rgba(44, 82, 130, 0.2);
             flex: 0 0 auto;
-            position: relative;
-            overflow: hidden;
-        }
-        .hero-card::before {
-            content: '';
-            position: absolute;
-            top: -30%;
-            right: -20%;
-            width: 200px;
-            height: 200px;
-            background: rgba(255,255,255,0.03);
-            border-radius: 50%;
         }
         .clock-time {
-            font-size: 38px;
-            font-weight: 800;
+            font-size: 36px;
+            font-weight: 700;
             letter-spacing: 1px;
             font-variant-numeric: tabular-nums;
             display: block;
-            margin-bottom: 4px;
+            margin-bottom: 5px;
         }
         .clock-date {
-            font-size: 13px;
-            opacity: 0.75;
+            font-size: 14px;
+            opacity: 0.9;
             font-weight: 500;
             text-transform: uppercase;
-            letter-spacing: 1.5px;
+            letter-spacing: 1px;
         }
 
         /* 4. APP GRID */
         .app-section-title {
-            font-size: 11px;
+            font-size: 13px;
             font-weight: 700;
             color: #718096;
             text-transform: uppercase;
-            letter-spacing: 1.5px;
-            margin-bottom: 8px;
+            letter-spacing: 1.2px;
+            margin-bottom: 10px;
         }
         
         .app-grid {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
-            gap: 12px;
+            gap: 15px;
         }
 
         /* APP CARDS */
         .app-card {
             background: white;
-            border-radius: 14px;
-            padding: 18px 10px;
+            border-radius: 12px;
+            padding: 20px 10px;
             text-align: center;
             text-decoration: none;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-            border: 1px solid #e8ecf1;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.03);
+            border: 1px solid #e2e8f0;
             transition: transform 0.1s, box-shadow 0.1s;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            height: 130px;
-            position: relative;
-            overflow: hidden;
+            height: 140px;
         }
         .app-card:active {
-            transform: scale(0.97);
-            box-shadow: 0 1px 2px rgba(0,0,0,0.08);
-        }
-        .app-card.active-card {
-            border-bottom: 4px solid #3182ce;
-        }
-        .app-card.active-card::after {
-            content: '';
-            position: absolute;
-            top: 0; left: 0; right: 0;
-            height: 3px;
-            background: linear-gradient(90deg, #3182ce, #63b3ed);
+            transform: scale(0.98);
+            background-color: #f7fafc;
         }
 
         .app-icon {
-            font-size: 40px;
-            margin-bottom: 12px;
+            font-size: 48px;
+            margin-bottom: 15px;
             display: block;
         }
         
         .app-title {
-            font-size: 13px;
+            font-size: 16px;
             font-weight: 700;
             color: #2d3748;
             display: block;
-            letter-spacing: 0.3px;
         }
 
         .app-card.disabled {
-            opacity: 0.45;
-            background-color: #f9fafb;
+            opacity: 0.6;
+            background-color: #f7fafc;
             border-style: dashed;
-            border-color: #d1d5db;
             pointer-events: none;
-        }
-        .app-card.disabled .app-title {
-            color: #9ca3af;
         }
 
         /* 5. FOOTER */
         .footer-bar {
             text-align: center;
-            padding: 20px 16px;
+            padding: 30px 20px;
             flex: 0 0 auto;
             background: #fff;
-            border-top: 1px solid #e8ecf1;
+            border-top: 1px solid #e2e8f0;
         }
         
+        /* UPDATED FOOTER BUTTON STYLE */
         .btn-footer-action {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            padding: 10px 24px;
+            padding: 12px 30px;
             background: white;
             border: 2px solid #e53e3e;
             color: #e53e3e;
-            border-radius: 8px;
+            border-radius: 30px;
             text-decoration: none;
-            font-weight: 700;
-            font-size: 13px;
+            font-weight: bold;
+            font-size: 14px;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-            transition: all 0.15s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: all 0.2s ease;
             white-space: nowrap;
             cursor: pointer;
         }
-        .btn-footer-action:hover,
-        .btn-footer-action:active {
+        .btn-footer-action:hover {
             background: #e53e3e;
-            color: white;
-        }
-        .btn-fs {
-            border-color: #4a5568;
-            color: #4a5568;
-        }
-        .btn-fs:hover,
-        .btn-fs:active {
-            background: #4a5568;
             color: white;
         }
         
         .version-text {
-            margin-top: 14px;
+            margin-top: 20px;
             color: #cbd5e0;
-            font-size: 10px;
-            letter-spacing: 0.5px;
+            font-size: 11px;
         }
     </style>
 </head>
 <body>
 
     <div class="nav-bar">
-        <img src="{{ url_for('static', filename='logo/twg.png') }}" alt="TWG" class="brand-logo">
+        <div class="brand-title">TWG - WMS</div>
         <div class="user-info">
             <span class="user-id">{{ session['user_id'] }}</span>
             <span class="user-loc">📍 {{ session['location'] }}</span>
@@ -250,24 +221,24 @@
             <div class="app-section-title">Warehouse Operations</div>
             <div class="app-grid">
                 
-                <a href="/picking" class="app-card active-card">
+                <a href="/picking" class="app-card" style="border-bottom: 4px solid #3182ce;">
                     <span class="app-icon">📦</span>
                     <span class="app-title">Order Pick</span>
                 </a>
 
                 <div class="app-card disabled">
-                    <span class="app-icon">📊</span>
-                    <span class="app-title">Cycle Count</span>
+                    <span class="app-icon" style="filter: grayscale(100%); opacity: 0.5;">📊</span>
+                    <span class="app-title" style="color: #a0aec0;">Cycle Count</span>
                 </div>
 
                 <div class="app-card disabled">
-                    <span class="app-icon">🚚</span>
-                    <span class="app-title">Receiving</span>
+                    <span class="app-icon" style="filter: grayscale(100%); opacity: 0.5;">🚚</span>
+                    <span class="app-title" style="color: #a0aec0;">Receiving</span>
                 </div>
 
                 <div class="app-card disabled">
-                    <span class="app-icon">🏷️</span>
-                    <span class="app-title">Label Print</span>
+                    <span class="app-icon" style="filter: grayscale(100%); opacity: 0.5;">🏷️</span>
+                    <span class="app-title" style="color: #a0aec0;">Label Print</span>
                 </div>
 
             </div>
@@ -276,9 +247,12 @@
     </div>
 
     <div class="footer-bar">
-        <div style="display: flex; gap: 12px; justify-content: center;">
+        <div style="display: flex; gap: 15px; justify-content: center;">
             <a href="/logout" class="btn-footer-action">Sign Out</a>
-            <button id="fs-toggle-btn" class="btn-footer-action btn-fs">⛶ Fullscreen</button>
+            
+            <button id="fs-toggle-btn" class="btn-footer-action" style="border-color: #2b6cb0; color: #2b6cb0;">
+                ⛶ Fullscreen
+            </button>
         </div>
         <div class="version-text">v1.7 • Connected</div>
     </div>
