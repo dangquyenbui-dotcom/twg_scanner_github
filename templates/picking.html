@@ -5,7 +5,7 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="theme-color" content="#2d3748">
+    <meta name="theme-color" content="#1a202c">
     <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
     <title>Picking - {{ so }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
@@ -20,10 +20,11 @@
     </div>
 
     {% if not so %}
-    <div class="tc52-layout" style="justify-content: flex-start; align-items: center; background: #f7fafc; padding-top: 40px;">
+    <div class="tc52-layout" style="justify-content: flex-start; align-items: center; background: #f4f6f9; padding-top: 30px;">
         <div style="width: 100%; max-width: 320px; padding: 20px; text-align: center;">
-            <div style="font-size: 40px; margin-bottom: 10px;">🏭</div>
-            <h2 style="color: #2d3748; margin: 0 0 20px 0;">TWG PICKING</h2>
+            <img src="{{ url_for('static', filename='logo/twg.png') }}" alt="TWG" style="height: 44px; margin-bottom: 14px;">
+            <h2 style="color: #1a202c; margin: 0 0 6px 0; font-size: 18px; font-weight: 800; letter-spacing: 0.5px;">SALES ORDER PICK</h2>
+            <p style="color: #718096; font-size: 12px; margin: 0 0 20px 0;">Scan or enter a Sales Order number</p>
             
             <form id="soForm" method="GET" action="/picking" novalidate>
                 <div class="input-wrapper" style="margin-bottom: 20px;">
@@ -31,7 +32,7 @@
                            name="so" 
                            id="soInput" 
                            class="scan-input" 
-                           style="height: 60px; font-size: 24px; text-align: center; border: 2px solid #2b6cb0;" 
+                           style="height: 56px; font-size: 24px; text-align: center; border: 2px solid #2d3748; border-radius: 8px;" 
                            placeholder="Scan/Type SO" 
                            autocomplete="off" 
                            autofocus
@@ -40,7 +41,7 @@
             </form>
             
             <a href="/dashboard" class="btn-footer btn-exit" 
-               style="text-decoration:none; display: inline-flex; width: auto; padding: 0 40px;">
+               style="text-decoration:none; display: inline-flex; width: auto; padding: 0 40px; border-radius: 8px; background: #718096;">
                Cancel
             </a>
         </div>
@@ -48,16 +49,19 @@
 
     {% else %}
     <div class="tc52-layout" id="tc52Layout">
-        <div class="tc52-header">
+        <div class="tc52-header" style="background: #1a202c; border-bottom: none;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="font-weight:800; color:#e53e3e; font-size: 16px;">TWG WMS</span>
-                <span style="font-size:11px; color:#4a5568;">{{ session['user_id'] }} ({{ session['location'] }})</span>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <img src="{{ url_for('static', filename='logo/twg.png') }}" alt="TWG" style="height: 24px;">
+                    <span style="font-weight: 700; color: #a0aec0; font-size: 11px; letter-spacing: 0.5px;">SALES ORDER PICK</span>
+                </div>
+                <span style="font-size:11px; color:#a0aec0; font-weight: 600;">{{ session['user_id'] }} <span style="color:#718096;">({{ session['location'] }})</span></span>
             </div>
             
-            <div style="display: flex; align-items: center; margin-top: 6px; background: #edf2f7; padding: 4px; border-radius: 4px;">
-                <span style="font-weight:bold; font-size: 13px; color: #2d3748; margin-right: 8px;">ORDER:</span>
-                <strong style="font-size: 16px; color: #2b6cb0; flex: 1;">{{ so }}</strong>
-                <a href="/picking" style="font-size:11px; color:#e53e3e; text-transform: uppercase; text-decoration: none; border: 1px solid #e53e3e; padding: 2px 6px; border-radius: 3px;">Change</a>
+            <div style="display: flex; align-items: center; margin-top: 5px; background: #2d3748; padding: 5px 8px; border-radius: 5px;">
+                <span style="font-weight:600; font-size: 11px; color: #a0aec0; margin-right: 6px; letter-spacing: 0.5px;">ORDER</span>
+                <strong style="font-size: 15px; color: #63b3ed; flex: 1; letter-spacing: 0.5px;">{{ so }}</strong>
+                <a href="/picking" style="font-size:10px; color:#fc8181; text-transform: uppercase; text-decoration: none; border: 1px solid #fc8181; padding: 2px 8px; border-radius: 4px; font-weight: 700; letter-spacing: 0.3px;">Change</a>
             </div>
         </div>
 
@@ -115,6 +119,11 @@
                 </div>
             </div>
 
+            <!-- UPC Translation Badge — shows when a UPC barcode is matched to an item -->
+            <div id="upcBadge" class="upc-badge upc-badge-hidden">
+                <span id="upcBadgeText" class="upc-badge-inner"></span>
+            </div>
+
             <div class="control-row disabled-control">
                 <span class="control-label">Pick Qty</span>
                 <div class="input-wrapper">
@@ -154,7 +163,7 @@
             </div>
             <div class="modal-body">
                 <table class="pick-table">
-                    <thead style="background:#f7fafc;"><tr><th>Item</th><th>Bin</th><th>Qty</th><th></th></tr></thead>
+                    <thead style="background:#f7fafc;"><tr><th>Item</th><th>Bin</th><th>Qty</th><th>Mode</th><th></th></tr></thead>
                     <tbody id="reviewList"></tbody>
                 </table>
                 <div id="emptyReview" class="text-center" style="padding:20px; color:#a0aec0;">No items scanned.</div>
@@ -219,7 +228,6 @@
             }
 
             // Keyboard is considered "open" if viewport shrinks by more than 80px
-            // (lowered threshold to catch address bar + keyboard combo)
             var heightDiff = originalHeight - viewportHeight;
             var isKeyboardNow = heightDiff > 80;
 
@@ -233,25 +241,21 @@
             }
 
             if (isKeyboardNow) {
-                // Resize layout to fit exactly within the visible viewport
                 layout.style.height = viewportHeight + 'px';
                 layout.style.top = offsetTop + 'px';
                 layout.style.bottom = 'auto';
             } else {
-                // Reset to full screen
                 layout.style.height = '';
                 layout.style.top = '0';
                 layout.style.bottom = '0';
             }
         }
 
-        // Listen to visualViewport events (best mobile support)
         if (window.visualViewport) {
             window.visualViewport.addEventListener('resize', handleViewportResize);
             window.visualViewport.addEventListener('scroll', handleViewportResize);
         }
 
-        // Fallback for browsers without visualViewport
         window.addEventListener('resize', function() {
             if (!keyboardOpen) {
                 originalHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
@@ -259,7 +263,6 @@
             handleViewportResize();
         });
 
-        // Update context bar and viewport when control inputs get focus
         document.querySelectorAll('#scanForm input.scan-input').forEach(function(el) {
             el.addEventListener('focus', function() {
                 setTimeout(function() {
@@ -275,7 +278,6 @@
             });
         });
 
-        // Track orientation changes to reset baseline height
         window.addEventListener('orientationchange', function() {
             setTimeout(function() {
                 originalHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
@@ -283,7 +285,6 @@
             }, 500);
         });
 
-        // Recalculate baseline after fullscreen changes
         ['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange', 'MSFullscreenChange'].forEach(function(evt) {
             document.addEventListener(evt, function() {
                 setTimeout(function() {
@@ -293,7 +294,6 @@
             });
         });
 
-        // Expose updateContextBar so picking.js selectRow can call it
         window.updateContextBar = updateContextBar;
     })();
     </script>

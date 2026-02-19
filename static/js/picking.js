@@ -126,6 +126,9 @@ function selectRow(row, itemCode, remainingQty, lineNo, upc) {
     document.getElementById('binInput').value = ''; 
     document.getElementById('itemInput').value = '';
     
+    // Hide UPC badge on new row selection
+    hideUpcBadge();
+    
     updateSessionDisplay(sessionPicks);
     currentBinMaxQty = 999999; 
     setTimeout(() => safeFocus('binInput'), 100);
@@ -175,6 +178,7 @@ function addToSession() {
     let qty = isAutoMode ? 1 : (parseFloat(document.getElementById('qtyInput').value)||0);
     if(qty <= 0) return;
 
+    // --- Client-side guards use MERGED totals (lineNo+bin+item, ignoring mode) ---
     const currentLineTotal = sessionPicks.filter(p => p.lineNo === selectedLineNo).reduce((s,p) => s + p.qty, 0);
     const currentBinTotal = sessionPicks.filter(p => p.item === selectedItemCode && p.bin === currentBin).reduce((s,p) => s + p.qty, 0);
     
@@ -182,10 +186,18 @@ function addToSession() {
     if(currentLineTotal + qty > currentOrderMaxQty) { showToast(`Order Limit: ${currentOrderMaxQty}`, 'error'); return; }
 
     playBeep('success');
-    const existingIndex = sessionPicks.findIndex(p => p.lineNo === selectedLineNo && p.bin === currentBin && p.item === selectedItemCode);
+
+    // Determine current pick mode label
+    var pickModeLabel = isAutoMode ? 'Auto' : 'Manual';
+
+    // Deduplication includes mode — so Auto and Manual show as SEPARATE rows in View Scanned
+    const existingIndex = sessionPicks.findIndex(p => p.lineNo === selectedLineNo && p.bin === currentBin && p.item === selectedItemCode && p.mode === pickModeLabel);
     
-    if (existingIndex > -1) sessionPicks[existingIndex].qty += qty;
-    else sessionPicks.push({ id:Date.now(), lineNo:selectedLineNo, item:selectedItemCode, bin:currentBin, qty:qty });
+    if (existingIndex > -1) {
+        sessionPicks[existingIndex].qty += qty;
+    } else {
+        sessionPicks.push({ id:Date.now(), lineNo:selectedLineNo, item:selectedItemCode, bin:currentBin, qty:qty, mode:pickModeLabel });
+    }
 
     updateSessionDisplay(sessionPicks);
     
@@ -201,6 +213,9 @@ function addToSession() {
 function resetInputAfterAdd(success) {
     if(isAutoMode) {
         document.getElementById('itemInput').value = '';
+        // NOTE: Do NOT hide UPC badge here — let it stay visible so the picker
+        // can see the translation confirmation. It will hide on the next scan
+        // cycle (new input into itemInput, row change, or mismatch).
         setTimeout(() => safeFocus('itemInput'), 50);
     } else if(success) {
         document.getElementById('qtyInput').value = 1;
@@ -215,23 +230,98 @@ function handleItemScan() {
     const itemNorm = (selectedItemCode || "").trim().toLowerCase();
     const upcNorm = selectedUpc ? selectedUpc.toLowerCase() : "";
 
-    const match = scanNorm === itemNorm || (upcNorm && scanNorm === upcNorm);
+    const isDirectMatch = (scanNorm === itemNorm);
+    const isUpcMatch = (upcNorm && scanNorm === upcNorm);
+    const match = isDirectMatch || isUpcMatch;
     
     if(!match) {
         showToast("Wrong Item/UPC!", 'error'); 
         document.getElementById('itemInput').value=''; 
+        hideUpcBadge();
         if(isAutoMode) setTimeout(() => safeFocus('itemInput'), 50);
         return;
+    }
+    
+    // Show UPC translation badge if matched via UPC (not direct item code)
+    if (isUpcMatch && !isDirectMatch) {
+        showUpcBadge(scan, selectedItemCode);
+    } else {
+        hideUpcBadge();
     }
     
     if (isAutoMode) addToSession();
     else document.getElementById('qtyInput').focus();
 }
 
+// --- UPC TRANSLATION BADGE ---
+
+function showUpcBadge(upcValue, itemCode) {
+    var badge = document.getElementById('upcBadge');
+    if (!badge) return;
+    
+    var upcText = document.getElementById('upcBadgeText');
+    if (upcText) {
+        upcText.innerHTML = '<span class="upc-badge-label">UPC</span> ' + 
+            escapeHtml(upcValue) + 
+            ' <span class="upc-badge-arrow">\u2192</span> ' + 
+            '<strong>' + escapeHtml(itemCode) + '</strong>' +
+            ' <span class="upc-badge-check">\u2713</span>';
+    }
+    
+    // Force reflow so transition plays even if already visible
+    badge.classList.remove('upc-badge-visible');
+    badge.classList.add('upc-badge-hidden');
+    void badge.offsetWidth;
+    badge.classList.remove('upc-badge-hidden');
+    badge.classList.add('upc-badge-visible');
+}
+
+function hideUpcBadge() {
+    var badge = document.getElementById('upcBadge');
+    if (!badge) return;
+    badge.classList.remove('upc-badge-visible');
+    badge.classList.add('upc-badge-hidden');
+}
+
+function escapeHtml(str) {
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(str));
+    return div.innerHTML;
+}
+
+// --- END UPC BADGE ---
+
+/**
+ * Merges sessionPicks by lineNo + bin + item (summing qty, dropping mode).
+ * This produces the EXACT same payload shape as the original code before mode was added.
+ * The server receives one record per lineNo+bin+item — identical commit behavior.
+ */
+function mergePicksForCommit(picks) {
+    var merged = {};
+    picks.forEach(function(p) {
+        var key = p.lineNo + '|' + p.bin + '|' + p.item;
+        if (merged[key]) {
+            merged[key].qty += p.qty;
+        } else {
+            // Clone without mode — server never sees mode field
+            merged[key] = { id: p.id, lineNo: p.lineNo, item: p.item, bin: p.bin, qty: p.qty };
+        }
+    });
+    var result = [];
+    for (var k in merged) {
+        if (merged.hasOwnProperty(k)) result.push(merged[k]);
+    }
+    return result;
+}
+
 function submitFinal() {
     if(isSubmitting || sessionPicks.length===0) return;
     if(!navigator.onLine) { alert("OFFLINE. Connect to Wi-Fi."); return; }
-    if(!confirm(`CONFIRM SUBMISSION:\n\nAre you sure you want to commit ${sessionPicks.length} pick lines?`)) return;
+
+    // Merge for commit: combine Auto+Manual rows into single records per lineNo+bin+item
+    var commitPicks = mergePicksForCommit(sessionPicks);
+
+    if(!confirm(`CONFIRM SUBMISSION:\n\nAre you sure you want to commit ${commitPicks.length} pick lines?`)) return;
     
     isSubmitting = true;
     const btn = document.getElementById('btnSubmit'); 
@@ -243,7 +333,7 @@ function submitFinal() {
 
     fetch('/process_batch_scan', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ so:SO_NUMBER, picks:sessionPicks, batch_id:batchId })
+        body: JSON.stringify({ so:SO_NUMBER, picks:commitPicks, batch_id:batchId })
     })
     .then(r => r.json())
     .then(d => {
