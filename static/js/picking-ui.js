@@ -40,7 +40,10 @@ function showToast(m, t='info', playSound=true) {
     c.appendChild(d);
     
     if(playSound) playBeep(t==='error'?'error':'success');
-    setTimeout(() => { d.style.opacity = '0'; setTimeout(() => d.remove(), 300); }, 2000);
+
+    // Errors stay visible longer (4s) so the picker can read the message
+    const duration = (t === 'error') ? 4000 : 2000;
+    setTimeout(() => { d.style.opacity = '0'; setTimeout(() => d.remove(), 300); }, duration);
 }
 
 // --- BIN VALIDATION HELPER (Client-side safety filter) ---
