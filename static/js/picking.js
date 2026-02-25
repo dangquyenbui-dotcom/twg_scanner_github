@@ -39,6 +39,20 @@ function isVirtualKeyboardActive(el) {
     return el.inputMode && el.inputMode !== 'none';
 }
 
+/**
+ * Strips leading and trailing alphabetic characters from a scanned string.
+ * Some barcode scanners (e.g. Zebra TC52 via DataWedge) may prepend/append
+ * characters like 'A' to certain barcode symbologies (e.g. UPC-A).
+ * Example: 'A729419150129A' → '729419150129'
+ *
+ * This is ONLY used for item/UPC scan comparison in handleItemScan().
+ * It does NOT affect bin scanning, SO input, or any server-side data.
+ */
+function stripWrappingAlpha(str) {
+    if (!str) return str;
+    return str.replace(/^[A-Za-z]+/, '').replace(/[A-Za-z]+$/, '');
+}
+
 function attachScannerListeners() {
     document.querySelectorAll('input.scan-input').forEach(el => {
         let debounceTimer;
@@ -223,9 +237,13 @@ function resetInputAfterAdd(success) {
 }
 
 function handleItemScan() {
-    const scan = document.getElementById('itemInput').value.trim();
-    if(!selectedItemCode || !scan) return;
+    const rawScan = document.getElementById('itemInput').value.trim();
+    if(!selectedItemCode || !rawScan) return;
     
+    // Strip leading/trailing alpha characters that some scanners add (e.g. 'A729419150129A' → '729419150129')
+    // This only affects the comparison — selectedItemCode (used for submission) is untouched.
+    const scan = stripWrappingAlpha(rawScan);
+
     const scanNorm = scan.toLowerCase();
     const itemNorm = (selectedItemCode || "").trim().toLowerCase();
     const upcNorm = selectedUpc ? selectedUpc.toLowerCase() : "";
