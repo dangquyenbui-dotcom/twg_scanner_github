@@ -40,17 +40,30 @@ function isVirtualKeyboardActive(el) {
 }
 
 /**
- * Strips leading and trailing alphabetic characters from a scanned string.
- * Some barcode scanners (e.g. Zebra TC52 via DataWedge) may prepend/append
- * characters like 'A' to certain barcode symbologies (e.g. UPC-A).
- * Example: 'A729419150129A' → '729419150129'
+ * Strips leading and trailing alphabetic characters from a scanned string,
+ * BUT ONLY if BOTH ends have alpha wrapping AND the remaining core is purely numeric.
+ * This matches the specific DataWedge pattern where a symbology identifier
+ * character is added to both ends of a numeric UPC barcode (e.g. 'A729419150129A').
+ *
+ * Examples:
+ *   'A729419150129A' → '729419150129'  (alpha on BOTH ends, core all digits → strip)
+ *   'ABC12345'       → 'ABC12345'      (alpha only on left end → leave as-is)
+ *   '12345ABC'       → '12345ABC'      (alpha only on right end → leave as-is)
+ *   'WIDGET-X'       → 'WIDGET-X'      (not numeric core → leave as-is)
+ *   'X100'           → 'X100'          (alpha only on left end → leave as-is)
+ *   '729419150129'   → '729419150129'  (no wrapping chars → unchanged)
  *
  * This is ONLY used for item/UPC scan comparison in handleItemScan().
  * It does NOT affect bin scanning, SO input, or any server-side data.
  */
 function stripWrappingAlpha(str) {
     if (!str) return str;
-    return str.replace(/^[A-Za-z]+/, '').replace(/[A-Za-z]+$/, '');
+    // Only match if string starts with letter(s), ends with letter(s), and has digits in between
+    var match = str.match(/^[A-Za-z]+(\d+)[A-Za-z]+$/);
+    if (match) {
+        return match[1];
+    }
+    return str;
 }
 
 function attachScannerListeners() {
