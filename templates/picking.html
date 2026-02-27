@@ -26,6 +26,19 @@
             <h2 style="color: #1a202c; margin: 0 0 6px 0; font-size: 18px; font-weight: 800; letter-spacing: 0.5px;">SALES ORDER PICK</h2>
             <p style="color: #718096; font-size: 12px; margin: 0 0 20px 0;">Scan or enter a Sales Order number</p>
             
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div style="padding: 10px 12px; margin-bottom: 14px; border-radius: 8px; font-size: 13px; font-weight: 600; text-align: left;
+                            {% if category == 'error' %}background: #fff5f5; color: #c53030; border: 1px solid #feb2b2;
+                            {% elif category == 'success' %}background: #f0fff4; color: #276749; border: 1px solid #c6f6d5;
+                            {% else %}background: #ebf8ff; color: #2b6cb0; border: 1px solid #bee3f8;{% endif %}">
+                            {{ message }}
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
             <form id="soForm" method="GET" action="/picking" novalidate>
                 <div class="input-wrapper" style="margin-bottom: 20px;">
                     <input type="text" 

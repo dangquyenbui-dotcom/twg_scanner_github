@@ -186,6 +186,22 @@ def picking_menu():
                 return render_template('picking.html', so=None, items=[])
             
             resolved_so = check_row[0] 
+            
+            # CHECK: Picker must be assigned (somast.picker cannot be NULL or blank)
+            try:
+                picker_sql = f"SELECT picker FROM {Config.DB_ORDERS}.dbo.SOMAST WHERE sono=?"
+                cursor.execute(picker_sql, (resolved_so,))
+                picker_row = cursor.fetchone()
+                picker_val = (str(picker_row[0]).strip() if picker_row and picker_row[0] is not None else '') if picker_row else ''
+                
+                if not picker_val:
+                    flash("❌ Assigned picker required. This order has not been assigned to a picker.", "error")
+                    return render_template('picking.html', so=None, items=[])
+            except Exception as e:
+                logging.error(f"Picker check error: {e}")
+                flash("❌ Unable to verify picker assignment.", "error")
+                return render_template('picking.html', so=None, items=[])
+            
             user_loc = session.get('location', 'Unknown').strip()
             
             # 1. FETCH ORDER LINES (exclude cancelled lines where sostat = 'X')
