@@ -125,12 +125,13 @@ function renderReviewList(sessionPicks) {
 function renderExceptionList(shortLines) {
     const l = document.getElementById('exceptionList');
     
+    // SHORTENED VALUES to prevent SQL truncation errors
     const EXCEPTION_CODES = [
         {val: "", label: "-- Select Reason --"},
-        {val: "SHORT_PICK", label: "Short Pick (Not enough in bin)"},
-        {val: "DAMAGED", label: "Damaged (Found, unpickable)"},
-        {val: "NO_FIND", label: "No Find (Bin empty/Missing)"},
-        {val: "WRONG_LOC", label: "Wrong Location (Inv mismatch)"}
+        {val: "SHORT", label: "Short Pick (Not enough in bin)"},
+        {val: "DMG", label: "Damaged (Found, unpickable)"},
+        {val: "NOFND", label: "No Find (Bin empty/Missing)"},
+        {val: "BADLC", label: "Wrong Location (Inv mismatch)"}
     ];
 
     let html = '';
