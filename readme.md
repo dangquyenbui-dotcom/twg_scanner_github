@@ -2,8 +2,8 @@
 
 ## Project Status
 
-**Phase:** 3 — Batch Scanning with Hardened Commit Logic
-**Current Mode:** LIVE COMMIT MODE — The application validates all logic (inventory availability, order limits, location checks) and performs live SQL `UPDATE` and `INSERT` operations against the database. All writes are wrapped in a single transaction with automatic rollback on any failure.
+**Phase:** 3 — Batch Scanning with Hardened Commit Logic + Short-Pick Exception Workflow
+**Current Mode:** LIVE COMMIT MODE — The application validates all logic (inventory availability, order limits, location checks) and performs live SQL `UPDATE` and `INSERT` operations against the database. All writes are wrapped in a single transaction with automatic rollback on any failure. Post-commit verification detects concurrent modifications and logs warnings without rollback.
 
 ---
 
@@ -30,7 +30,9 @@
 │   ├── js/
 │   │   ├── utils.js        # Shared utilities: UUID, audio, fullscreen, logging
 │   │   ├── picking.js      # Core picking logic: state, scanning, validation, submission
-│   │   └── picking-ui.js   # UI rendering: toasts, modals, bin list, review list
+│   │   └── picking-ui.js   # UI rendering: toasts, modals, bin list, review list, custom dialogs
+│   ├── logo/
+│   │   └── twg.png         # TWG brand logo used across all pages
 │   └── manifest.json       # PWA manifest for home screen install
 ├── templates/
 │   ├── login.html          # User authentication screen
@@ -52,7 +54,7 @@ DB_SERVER=YOUR_SERVER_IP
 DB_UID=YOUR_USER
 DB_PWD=YOUR_PASSWORD
 DB_AUTH=PRO12       # Database for Inventory, Users, Audit (ScanOnhand2, ScanUsers, ScanBinTran2, ScanItem)
-DB_ORDERS=PRO05     # Database for Sales Orders (SOTRAN)
+DB_ORDERS=PRO05     # Database for Sales Orders (SOTRAN, SOMAST)
 ```
 
 ### Config Class (`config.py`)
@@ -60,7 +62,7 @@ DB_ORDERS=PRO05     # Database for Sales Orders (SOTRAN)
 The `Config` class loads all values from environment variables with fallback defaults. Two database references are maintained separately:
 
 - `DB_AUTH` — Used for inventory tables (`ScanOnhand2`), user authentication (`ScanUsers`), UPC mapping (`ScanItem`), and audit logging (`ScanBinTran2`).
-- `DB_ORDERS` — Used exclusively for the sales order table (`SOTRAN`).
+- `DB_ORDERS` — Used for the sales order tables (`SOTRAN`, `SOMAST`).
 
 ---
 
@@ -92,6 +94,15 @@ Bin-level inventory with on-hand and allocation tracking.
 | `lupdate` | Last update timestamp |
 | `luser` | Last user who modified the record |
 
+### SOMAST (DB_ORDERS)
+
+Sales order master header.
+
+| Column | Purpose |
+|--------|---------|
+| `sono` | Sales order number |
+| `picker` | Assigned picker (must be non-empty to allow picking) |
+
 ### SOTRAN (DB_ORDERS)
 
 Sales order transaction lines.
@@ -104,6 +115,7 @@ Sales order transaction lines.
 | `qtyord` | Quantity ordered |
 | `shipqty` | Quantity already shipped/picked |
 | `stkcode` | Stock code flag (only `'Y'` lines are pickable) |
+| `sostat` | Line status flag (`'X'` = cancelled, excluded from picks) |
 | `loctid` | Location assignment for the order line |
 | `shipdate` | Last ship/pick date |
 
@@ -125,7 +137,7 @@ Audit log for all pick transactions.
 | `deviceid` | Empty string | Reserved for device tracking |
 | `adddate` | `GETDATE()` | Server-side timestamp |
 | `scanstat` | Empty string | Reserved for future use |
-| `scanresult` | Empty string | Reserved for future use |
+| `scanresult` | Exception code or empty | Short-pick reason code (e.g., `SHORT`, `DMG`, `NOFND`, `BADLC`) |
 
 ### ScanItem (DB_AUTH)
 
@@ -195,7 +207,7 @@ Authenticates a user against the `ScanUsers` table.
 
 ### `GET /dashboard`
 
-Renders the main menu with a live clock, user info, and app grid. Only the "Order Pick" module is currently active. Requires an active session.
+Renders the main menu with a live clock, user info, and app grid. Only the "Order Pick" module is currently active. Other modules (Cycle Count, Receiving, Label Print) are shown as disabled placeholders. Requires an active session.
 
 ### `GET /picking?so=<order_number>`
 
@@ -207,11 +219,12 @@ Fetches and displays order lines for picking. This endpoint handles two states:
 
 **Process:**
 1. Resolves the SO number using a `LIKE` match (handles leading spaces in the database).
-2. Fetches open order lines from `SOTRAN` where `qtyord > shipqty` and `stkcode = 'Y'`.
-3. Filters by user location unless the user is assigned to location `'000'` (all-access) or `'Unknown'`.
-4. Fetches UPC mappings from `ScanItem` for all unique items in the order.
-5. Strips whitespace from all item codes and UPC values during mapping.
-6. If no open lines remain, flashes a "fully picked" success message.
+2. Validates picker assignment by checking `SOMAST.picker` is non-empty. If no picker is assigned, the order is rejected with an error message.
+3. Fetches open order lines from `SOTRAN` where `qtyord > shipqty`, `stkcode = 'Y'`, and `sostat <> 'X'` (excludes cancelled lines).
+4. Filters by user location unless the user is assigned to location `'000'` (all-access) or `'Unknown'`.
+5. Fetches UPC mappings from `ScanItem` for all unique items in the order.
+6. Strips whitespace from all item codes and UPC values during mapping.
+7. If no open lines remain, flashes a "fully picked" success message.
 
 ### `POST /get_item_bins`
 
@@ -254,9 +267,15 @@ Verifies that a specific item exists in a scanned bin with available stock.
     { "lineNo": 1, "item": "ITEM1", "bin": "BIN_CODE", "qty": 5 },
     { "lineNo": 1, "item": "ITEM1", "bin": "BIN_CODE2", "qty": 3 }
   ],
+  "exceptions": {
+    "1": "SHORT",
+    "3": "NOFND"
+  },
   "batch_id": "uuid-string"
 }
 ```
+
+The `exceptions` object is optional. It maps `tranlineno` (as string) to a short-pick reason code. These codes are written to the `scanresult` column in `ScanBinTran2` for lines that were partially picked. Valid codes are `SHORT`, `DMG`, `NOFND`, `BADLC` (max 10 characters, truncated for safety).
 
 **The commit process follows 6 sequential phases:**
 
@@ -337,8 +356,10 @@ One row is inserted per pick (not per aggregated line) to maintain full granular
 ```sql
 INSERT INTO ScanBinTran2
 (actiontype, applid, udref, tranlineno, upc, item, binfr, quantity, userid, deviceid, adddate, scanstat, scanresult)
-VALUES ('SP', 'SO', ?, ?, ?, ?, ?, ?, ?, '', GETDATE(), '', '')
+VALUES ('SP', 'SO', ?, ?, ?, ?, ?, ?, ?, '', GETDATE(), '', ?)
 ```
+
+The `scanresult` column receives the short-pick exception code for the corresponding line number (if one was provided in the request), or an empty string for fully-picked lines.
 
 ---
 
@@ -349,7 +370,27 @@ After `conn.commit()` succeeds, the application performs read-only verification 
 **SOTRAN shipqty verification:**
 For each updated order line, the application re-reads `shipqty` and compares it to the expected value (pre-update value + aggregated pick quantity). A mismatch indicates a concurrent modification occurred between the pre-read and the commit.
 
-If any post-commit warnings are generated, they are included in the response and logged, but the response status remains `'success'` since the transaction was committed.
+If any post-commit warnings are generated, they are included in the response `warnings` array and logged, but the response status remains `'success'` since the transaction was committed.
+
+**Response (success):**
+```json
+{
+  "status": "success",
+  "msg": "SUCCESS: Processed 3 lines.\nUpdated Inventory & Order.",
+  "batch_id": "uuid-string",
+  "warnings": null
+}
+```
+
+**Response (success with warnings):**
+```json
+{
+  "status": "success",
+  "msg": "SUCCESS: Processed 3 lines.\nUpdated Inventory & Order.\n⚠️ 1 verification warning(s) logged.",
+  "batch_id": "uuid-string",
+  "warnings": ["POST-CHECK WARN: Line 1 (item 'ABC') — expected shipqty=10, actual=12."]
+}
+```
 
 ---
 
@@ -398,10 +439,15 @@ The application supports both hardware barcode scanners (Zebra TC52) and manual 
 - **Virtual keyboard input:** Waits for the user to press Enter (no auto-trigger to prevent premature submission while typing).
 - **SO Input:** Auto-submits when exactly 7 digits are detected (after trimming).
 
+**DataWedge symbology stripping (`stripWrappingAlpha()`):** Some Zebra DataWedge configurations add a symbology identifier character to both ends of a scanned UPC barcode (e.g., `A729419150129A`). The `stripWrappingAlpha()` function detects this pattern — alpha characters wrapping both ends of a purely numeric core — and strips them for comparison only. This does not affect bin scanning, SO input, or any data sent to the server. Examples:
+- `'A729419150129A'` → `'729419150129'` (stripped — alpha on both ends, numeric core)
+- `'ABC12345'` → `'ABC12345'` (unchanged — alpha only on left end)
+- `'WIDGET-X'` → `'WIDGET-X'` (unchanged — not a numeric core)
+
 **Input flow:**
 1. **Select Row** → User taps an order line in the grid. Controls are enabled, bin input is focused.
 2. **Scan Bin** → Validates bin against `ScanOnhand2` (uses cache if available, otherwise calls `/validate_bin`). On success, focuses item input.
-3. **Scan Item** → Compares scanned value against the selected item code and its UPC (case-insensitive). On mismatch, shows error and clears input.
+3. **Scan Item** → Compares scanned value against the selected item code and its UPC (case-insensitive, with `stripWrappingAlpha()` applied). On mismatch, shows error and clears input.
 4. **Add to Session** → In Auto mode, automatically adds quantity of 1 after successful item scan. In Manual mode, user adjusts quantity and clicks ADD.
 
 ### Pick Modes
@@ -409,20 +455,41 @@ The application supports both hardware barcode scanners (Zebra TC52) and manual 
 - **Auto Mode** (default): Quantity is fixed at 1. Each successful item scan immediately adds to the session. Designed for single-unit picks with a hardware scanner.
 - **Manual Mode**: Quantity input is editable with +/- buttons. User must click ADD after scanning. Designed for bulk picks.
 
+### UPC Translation Badge
+
+When a scanned barcode matches a UPC (not the direct item code), a visual translation badge appears below the Scan Item input showing the UPC-to-item mapping. For example: `UPC 729419150129 → ITEM-ABC ✓`. The badge uses a slide-in animation and stays visible during repeated scans of the same UPC. It hides on row change, mismatch, or when the item code itself is scanned directly.
+
 ### Session Management (`picking.js`)
 
 Picks are stored in a local `sessionPicks` array and persisted to `localStorage` under keys prefixed with the SO number (`twg_picks_<SO>`). This survives page refreshes and accidental navigation.
 
 **Session pick structure:**
 ```javascript
-{ id: timestamp, lineNo: 1, item: "ITEM1", bin: "BIN_CODE", qty: 5 }
+{ id: timestamp, lineNo: 1, item: "ITEM1", bin: "BIN_CODE", qty: 5, mode: "Auto" }
 ```
 
-**Deduplication:** If a pick already exists for the same `lineNo + bin + item`, the quantity is incremented rather than creating a duplicate entry.
+**Deduplication:** If a pick already exists for the same `lineNo + bin + item + mode`, the quantity is incremented rather than creating a duplicate entry. Auto and Manual picks for the same line/bin/item are stored as separate rows in the review list.
+
+**Merge on commit:** Before submission, `mergePicksForCommit()` combines Auto and Manual rows for the same `lineNo + bin + item` into a single record by summing quantities. The `mode` field is dropped — the server never receives it. This ensures identical commit behavior regardless of how the picks were accumulated.
 
 **Guards (client-side):**
 - **Bin limit:** Total picked from a bin cannot exceed the on-hand quantity reported during bin validation.
 - **Order limit:** Total picked for a line cannot exceed the remaining order quantity (`qtyord - shipqty`).
+
+### Short-Pick Exception Workflow
+
+When the user taps **Submit**, the system checks whether any order lines were only partially picked (picked > 0 but less than the "Need" quantity). If partial picks are detected:
+
+1. The **Exception Modal** opens, listing each short-picked line with its item code, needed quantity, and picked quantity.
+2. The picker **must** select a reason code from a dropdown for every short-picked line before they can submit. Available codes:
+   - `SHORT` — Short Pick (Not enough in bin)
+   - `DMG` — Damaged (Found, unpickable)
+   - `NOFND` — No Find (Bin empty/Missing)
+   - `BADLC` — Wrong Location (Inventory mismatch)
+3. Once all reasons are selected, the picker taps **Confirm & Submit Batch**.
+4. Exception codes are sent to the server in the `exceptions` object and written to the `scanresult` column in `ScanBinTran2` for each corresponding line.
+
+If all lines are fully picked (or no picks exist for some lines), the exception modal is skipped and a standard confirmation dialog appears.
 
 ### Bin Cache (`picking.js`)
 
@@ -432,15 +499,26 @@ When a row is selected, bins are pre-fetched via `/get_item_bins` and cached in 
 
 - **Active Row Highlight:** Selected order line turns yellow with a gold bottom border.
 - **Flash Effects:** Quantity input flashes green on successful add.
-- **Toast Notifications:** Success (green) and error (red) banners appear at the top of the screen with auto-dismiss after 2 seconds.
+- **Toast Notifications:** Success (green, 2-second display) and error (red, 4-second display) banners appear at the top of the screen with auto-dismiss and fade-out. Audio beeps accompany toasts unless explicitly suppressed.
 - **Audio Beeps:** Success beep (1500Hz sine, 150ms) and error beep (150Hz sawtooth, 400ms) via the Web Audio API. Audio context is unlocked on the first user interaction.
 - **Pending Badge:** Status bar shows the count of unsubmitted picks.
 - **Disabled Controls:** All scan inputs and buttons are greyed out and disabled until a row is selected (prevents accidental picks without a target).
 
+### Custom Branded Dialogs (`picking-ui.js`)
+
+All confirmation and alert dialogs use custom-branded modals instead of the browser's native `alert()` and `confirm()`. This displays **"TWG WMS App"** as the dialog header instead of the server's IP address.
+
+- **`twgAlert(message)`** — Shows a branded dialog with an OK button. Returns a Promise that resolves when OK is tapped.
+- **`twgConfirm(message)`** — Shows a branded dialog with Cancel and OK buttons. Returns a Promise that resolves `true` (OK) or `false` (Cancel).
+
+Both functions are async/Promise-based. All calling functions (`checkExceptionsAndSubmit`, `removePick`, `clearSession`, `executeSubmit`, `confirmExceptionsAndSubmit`) use `await` or `.then()` accordingly.
+
 ### Modals
 
-- **Bin Modal:** Shows all available bins for the selected item with on-hand, allocated, and available quantities. Bins are filtered client-side using `isValidBin()`.
-- **Review Modal:** Shows all current session picks with item, bin, quantity, and a remove button per entry. Includes a "Clear All" option.
+- **Bin Modal:** Shows all available bins for the selected item with on-hand, allocated, and available quantities. Bins are filtered client-side using `isValidBin()`. Closeable via the X button **or by tapping the dark overlay area** outside the modal. On close, focus automatically returns to the Scan Bin input via `safeFocus('binInput')`.
+- **Review Modal:** Shows all current session picks with item, bin, quantity, mode badge (Auto/Manual), and a remove button per entry. Includes a "Clear All" option. Closeable via X button or overlay tap.
+- **Exception Modal:** Shows short-picked lines with required reason code dropdowns. Closeable via X button or overlay tap. Submission is blocked until all reason codes are selected.
+- **Custom Dialog (twgAlert/twgConfirm):** Dynamically created branded overlay for all confirmation and alert messages. Displays "📦 TWG WMS App" header with dark theme.
 
 ### Fullscreen Management (`utils.js`)
 
@@ -450,6 +528,7 @@ The application aggressively maintains fullscreen mode for the warehouse environ
 2. Monitors fullscreen exit events (e.g., accidental swipe) and re-attaches the enter listener.
 3. Dashboard includes a manual fullscreen toggle button.
 4. PWA standalone mode is detected and skips fullscreen API calls.
+5. Login page overrides the global `enterFullscreen()` to suppress fullscreen when input fields are focused (prevents keyboard conflicts).
 
 ---
 
@@ -475,6 +554,7 @@ The application applies aggressive whitespace handling throughout:
 - **Location values:** Stripped on read from both `ScanUsers` and `ScanOnhand2`.
 - **User ID:** Stripped and uppercased on login input.
 - **SO Number:** Resolved using `LIKE` match to handle leading-space padding in the database.
+- **Exception codes:** Truncated to max 10 characters before database insert to prevent column overflow.
 
 ---
 
@@ -484,11 +564,14 @@ The application applies aggressive whitespace handling throughout:
 |-------|-----------|----------|
 | DB Connection | `get_db_connection()` returns `None` | Routes flash "Database Offline" or return JSON error |
 | Login | Try/catch around query | Flashes specific error to login form |
+| Picker Validation | `SOMAST.picker` check | Rejects order if no picker assigned |
 | Picking query | Try/catch with `finally: conn.close()` | Flashes database error to picking page |
 | Batch pre-check | `raise Exception(...)` | Entire transaction is rolled back, error returned to client |
 | Batch SQL guard | `rowcount == 0` check | Entire transaction is rolled back, error returned to client |
 | Batch post-check | Try/catch, `logging.critical()` | Warnings logged and included in response, no rollback |
-| Client network | `fetch().catch()` | Alert shown to user, submit button re-enabled |
+| Client network | `fetch().catch()` | TWG-branded alert shown to user, submit button re-enabled |
+| Client guards | Bin limit / Order limit checks | Toast error shown, pick rejected before reaching server |
+| Exception validation | Dropdown required for short picks | TWG-branded alert blocks submission until all reasons selected |
 
 ---
 
@@ -499,3 +582,79 @@ The application applies aggressive whitespace handling throughout:
 - Flask sessions are signed with `SECRET_KEY`.
 - Connection timeout is set to 15 seconds.
 - Passwords are stored and compared as plain text in `ScanUsers` (legacy system constraint).
+- Exception codes are truncated server-side to max 10 characters to prevent injection via oversized values.
+
+---
+
+## JavaScript Function Reference
+
+### `utils.js`
+
+| Function | Purpose |
+|----------|---------|
+| `generateUUID()` | Creates a UUID using `crypto.randomUUID()` with fallback |
+| `getDeviceId()` | Returns or generates a persistent device ID in localStorage |
+| `log(msg)` | Writes timestamped message to debug console and `console.log` |
+| `toggleDebug()` | Shows/hides the on-screen debug console |
+| `isPWAStandalone()` | Detects if running as an installed PWA |
+| `isFullscreen()` | Checks current fullscreen state across browser prefixes |
+| `enterFullscreen()` | Requests fullscreen on `document.documentElement` |
+| `exitFullscreen()` | Exits fullscreen mode |
+| `autoEnterFullscreen()` | Attaches one-time listener to enter fullscreen on first user gesture |
+| `watchFullscreenExit()` | Re-enters fullscreen if accidentally exited |
+| `forceFullscreen()` | Legacy compat — enters fullscreen if not already active |
+| `unlockAudio()` | Resumes suspended AudioContext (required for mobile browsers) |
+| `playBeep(type)` | Plays success (1500Hz sine) or error (150Hz sawtooth) beep |
+
+### `picking-ui.js`
+
+| Function | Purpose |
+|----------|---------|
+| `updateStatusUI(online)` | Updates the status bar to show online/offline state |
+| `updateSessionDisplay(sessionPicks)` | Refreshes pick counts in the grid and pending badge |
+| `showToast(msg, type, playSound)` | Displays a timed notification banner (error: 4s, success: 2s) |
+| `isValidBin(binStr)` | Client-side bin validation (15 chars, numeric 5th character) |
+| `renderBinList(bins)` | Renders the bin modal table with stock levels |
+| `renderReviewList(sessionPicks)` | Renders the review modal table with mode badges |
+| `renderExceptionList(shortLines)` | Renders the exception modal with reason code dropdowns |
+| `openModal(id)` | Shows a modal overlay by ID |
+| `closeModal(id)` | Hides a modal overlay by ID; returns focus to binInput if closing bin modal |
+| `twgAlert(message)` | Branded alert dialog (async, returns Promise) |
+| `twgConfirm(message)` | Branded confirm dialog (async, returns Promise resolving true/false) |
+
+**Modal close behavior:** All modals (bin, review, exception) can be closed by tapping the dark overlay area outside the modal content, in addition to the X button. The bin modal specifically returns focus to the Scan Bin input on close.
+
+### `picking.js`
+
+| Function | Purpose |
+|----------|---------|
+| `isVirtualKeyboardActive(el)` | Detects virtual keyboard by checking `inputMode` |
+| `stripWrappingAlpha(str)` | Strips DataWedge symbology wrapping from UPC scans |
+| `attachScannerListeners()` | Binds keydown/input listeners to all scan inputs |
+| `handleAction(el)` | Routes input action to the correct handler based on element ID |
+| `selectRow(row, itemCode, remainingQty, lineNo, upc)` | Selects an order line, enables controls, prefetches bins |
+| `validateBin()` | Validates scanned bin against cache or server |
+| `verifySuccess(qty, bin)` | Stores bin context and advances focus to item input |
+| `addToSession()` | Adds a pick to the session with deduplication and guard checks |
+| `resetInputAfterAdd(success)` | Clears item input (Auto) or resets qty (Manual) after add |
+| `handleItemScan()` | Matches scanned value against item code or UPC |
+| `showUpcBadge(upcValue, itemCode)` | Shows the UPC translation badge with animation |
+| `hideUpcBadge()` | Hides the UPC translation badge |
+| `escapeHtml(str)` | Safely escapes HTML entities in a string |
+| `mergePicksForCommit(picks)` | Aggregates Auto+Manual picks into single records per line/bin/item |
+| `checkExceptionsAndSubmit()` | Entry point for submit — detects short picks, opens exception modal or confirms |
+| `confirmExceptionsAndSubmit()` | Collects exception codes from modal and proceeds to submit |
+| `executeSubmit(commitPicks, exceptions)` | Sends the final batch to `/process_batch_scan` |
+| `resetSubmitBtn(btn, txt)` | Re-enables submit button after error |
+| `saveToLocal()` | Persists session picks to localStorage |
+| `loadFromLocal()` | Restores session picks from localStorage |
+| `clearLocal()` | Removes all localStorage data for the current SO |
+| `updateMode()` | Toggles between Auto and Manual mode UI states |
+| `openBinModal()` | Opens the bin modal and triggers bin prefetch |
+| `prefetchBins(item)` | Fetches and caches bin data from `/get_item_bins` |
+| `openReviewModal()` | Opens the review modal with current session picks |
+| `removePick(i)` | Removes a single pick entry after TWG-branded confirmation |
+| `clearSession()` | Clears all picks after TWG-branded confirmation |
+| `toggleKeyboard(id)` | Toggles virtual keyboard visibility on an input |
+| `safeFocus(id)` | Focuses an input with `inputMode='none'` to prevent keyboard popup |
+| `adjustQty(n)` | Increments/decrements the quantity input in Manual mode |
