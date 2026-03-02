@@ -185,3 +185,84 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 });
+
+// ============================================================
+// CUSTOM DIALOGS — replaces browser alert() and confirm()
+// Shows "TWG WMS App" instead of the IP address
+// ============================================================
+
+var _twgDialogResolve = null;
+
+function _createDialogOverlay() {
+    var existing = document.getElementById('twgDialogOverlay');
+    if (existing) return existing;
+
+    var overlay = document.createElement('div');
+    overlay.id = 'twgDialogOverlay';
+    overlay.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); display:none; justify-content:center; align-items:center; z-index:9999;';
+
+    overlay.innerHTML = 
+        '<div id="twgDialogBox" style="background:white; width:88%; max-width:320px; border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,0.3); overflow:hidden;">' +
+            '<div style="background:#1a202c; padding:10px 14px; display:flex; align-items:center; gap:8px;">' +
+                '<span style="font-size:16px;">📦</span>' +
+                '<span style="color:#a0aec0; font-size:12px; font-weight:700; letter-spacing:0.5px;">TWG WMS App</span>' +
+            '</div>' +
+            '<div id="twgDialogMsg" style="padding:18px 16px; font-size:14px; color:#2d3748; line-height:1.5; white-space:pre-wrap; word-wrap:break-word;"></div>' +
+            '<div id="twgDialogButtons" style="padding:10px 16px 14px; display:flex; gap:10px; justify-content:flex-end;"></div>' +
+        '</div>';
+
+    document.body.appendChild(overlay);
+    return overlay;
+}
+
+/**
+ * Custom alert — shows a branded dialog with OK button.
+ * Returns a Promise that resolves when OK is tapped.
+ * Usage: await twgAlert("Something happened");
+ *    or: twgAlert("Something happened").then(function() { ... });
+ */
+function twgAlert(message) {
+    return new Promise(function(resolve) {
+        var overlay = _createDialogOverlay();
+        document.getElementById('twgDialogMsg').textContent = message;
+
+        var btnArea = document.getElementById('twgDialogButtons');
+        btnArea.innerHTML = '<button id="twgDialogOk" style="flex:1; height:40px; border:none; border-radius:6px; background:#1a202c; color:white; font-weight:700; font-size:14px; cursor:pointer;">OK</button>';
+
+        overlay.style.display = 'flex';
+
+        document.getElementById('twgDialogOk').onclick = function() {
+            overlay.style.display = 'none';
+            resolve();
+        };
+    });
+}
+
+/**
+ * Custom confirm — shows a branded dialog with Cancel / OK buttons.
+ * Returns a Promise that resolves true (OK) or false (Cancel).
+ * Usage: var ok = await twgConfirm("Are you sure?");
+ *    or: twgConfirm("Are you sure?").then(function(ok) { if(ok) ... });
+ */
+function twgConfirm(message) {
+    return new Promise(function(resolve) {
+        var overlay = _createDialogOverlay();
+        document.getElementById('twgDialogMsg').textContent = message;
+
+        var btnArea = document.getElementById('twgDialogButtons');
+        btnArea.innerHTML = 
+            '<button id="twgDialogCancel" style="flex:1; height:40px; border:2px solid #cbd5e0; border-radius:6px; background:white; color:#4a5568; font-weight:700; font-size:14px; cursor:pointer;">Cancel</button>' +
+            '<button id="twgDialogOk" style="flex:1; height:40px; border:none; border-radius:6px; background:#1a202c; color:white; font-weight:700; font-size:14px; cursor:pointer;">OK</button>';
+
+        overlay.style.display = 'flex';
+
+        document.getElementById('twgDialogCancel').onclick = function() {
+            overlay.style.display = 'none';
+            resolve(false);
+        };
+        document.getElementById('twgDialogOk').onclick = function() {
+            overlay.style.display = 'none';
+            resolve(true);
+        };
+    });
+}

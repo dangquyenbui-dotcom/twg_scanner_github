@@ -350,9 +350,9 @@ function mergePicksForCommit(picks) {
 
 // --- EXCEPTION WORKFLOW ---
 
-function checkExceptionsAndSubmit() {
+async function checkExceptionsAndSubmit() {
     if(isSubmitting || sessionPicks.length === 0) return;
-    if(!navigator.onLine) { alert("OFFLINE. Connect to Wi-Fi."); return; }
+    if(!navigator.onLine) { twgAlert("OFFLINE. Connect to Wi-Fi."); return; }
 
     pendingCommitPicks = mergePicksForCommit(sessionPicks);
     var shortLines = [];
@@ -388,7 +388,8 @@ function checkExceptionsAndSubmit() {
         openModal('exceptionModal');
     } else {
         // No partial picks, go straight to regular confirmation
-        if(!confirm(`CONFIRM SUBMISSION:\n\nAre you sure you want to commit ${pendingCommitPicks.length} pick lines?`)) return;
+        var ok = await twgConfirm("CONFIRM SUBMISSION:\n\nAre you sure you want to commit " + pendingCommitPicks.length + " pick lines?");
+        if (!ok) return;
         executeSubmit(pendingCommitPicks, {});
     }
 }
@@ -400,7 +401,7 @@ function confirmExceptionsAndSubmit() {
     // Ensure all partial-picked lines have a selected reason
     for (var i = 0; i < selects.length; i++) {
         if (!selects[i].value) {
-            alert("Please select a reason for all short-picked lines before submitting.");
+            twgAlert("Please select a reason for all short-picked lines before submitting.");
             return;
         }
         exceptions[selects[i].dataset.line] = selects[i].value;
@@ -427,16 +428,17 @@ function executeSubmit(commitPicks, exceptions) {
     .then(d => {
         if(d.status === 'success') { 
             playBeep('success'); 
-            alert(d.msg); 
-            clearLocal(); 
-            setTimeout(() => location.reload(), 1500); 
+            twgAlert(d.msg).then(function() {
+                clearLocal(); 
+                setTimeout(() => location.reload(), 500); 
+            });
         } else { 
-            alert("SERVER ERROR: "+d.msg); 
+            twgAlert("SERVER ERROR: "+d.msg); 
             resetSubmitBtn(btn, originalText);
         }
     })
     .catch(e => { 
-        alert("Network Failed: " + e.message); 
+        twgAlert("Network Failed: " + e.message); 
         resetSubmitBtn(btn, originalText);
     });
 }
@@ -508,15 +510,17 @@ function openReviewModal(){
     openModal('reviewModal');
 }
 
-function removePick(i){ 
-    if(confirm("Remove this entry?")){ 
+async function removePick(i){ 
+    var ok = await twgConfirm("Remove this entry?");
+    if(ok){ 
         sessionPicks.splice(i,1); 
         openReviewModal(); updateSessionDisplay(sessionPicks); setTimeout(saveToLocal, 0); 
     } 
 }
 
-function clearSession() {
-    if(confirm("Clear ALL scanned items?")) { 
+async function clearSession() {
+    var ok = await twgConfirm("Clear ALL scanned items?");
+    if(ok) { 
         sessionPicks = []; openReviewModal(); updateSessionDisplay(sessionPicks); setTimeout(saveToLocal, 0); 
     }
 }
