@@ -18,4 +18,4 @@ class Config:
     # --- SYSTEM SETTINGS ---
     # Set to False to actually UPDATE inventory and orders (LIVE MODE).
     # Set to True to only validate logic without changing data (TEST MODE).
-    SIMULATION_MODE = True
+    SIMULATION_MODE = False

@@ -93,8 +93,6 @@ def is_valid_bin(bin_value):
     Validates a bin value:
     - Must be exactly 15 characters long
     - The 5th character (index 4) must be numeric (0-9)
-    Example valid:   '000-10-00-00-00' (15 chars, 5th char '1' is numeric)
-    Example invalid: '000-PK-0-0'     (10 chars, 5th char 'P' is not numeric)
     """
     if not bin_value or len(bin_value) != 15:
         return False
@@ -187,7 +185,7 @@ def picking_menu():
             
             resolved_so = check_row[0] 
             
-            # CHECK: Picker must be assigned (somast.picker cannot be NULL or blank)
+            # CHECK: Picker must be assigned
             try:
                 picker_sql = f"SELECT picker FROM {Config.DB_ORDERS}.dbo.SOMAST WHERE sono=?"
                 cursor.execute(picker_sql, (resolved_so,))
@@ -204,7 +202,7 @@ def picking_menu():
             
             user_loc = session.get('location', 'Unknown').strip()
             
-            # 1. FETCH ORDER LINES (exclude cancelled lines where sostat = 'X')
+            # 1. FETCH ORDER LINES (exclude cancelled lines)
             base_sql = f"""
                 SELECT tranlineno, item, qtyord, shipqty, (qtyord - shipqty) as remaining, loctid 
                 FROM {Config.DB_ORDERS}.dbo.SOTRAN 
@@ -222,7 +220,7 @@ def picking_menu():
             rows = cursor.fetchall()
             order_items = [row_to_dict(cursor, row) for row in rows]
             
-            # 2. FETCH UPC MAPPING (Separate Step)
+            # 2. FETCH UPC MAPPING
             if order_items:
                 try:
                     unique_items = list(set((i['item'] or '').strip() for i in order_items))
@@ -366,13 +364,14 @@ def validate_bin():
 def process_batch_scan():
     """
     PRODUCTION MODE: Commits updates to ScanOnhand2, SOTRAN, and ScanBinTran2.
-    Includes: idempotency check, pre-commit validation, SQL-level guards, post-commit verification.
+    SIMULATION MODE: Runs all logic, but executes a ROLLBACK at the end.
     """
     if 'user_id' not in session: return jsonify({'status':'error', 'msg':'Session expired'})
     detect_columns()
     
     data = request.json
     picks = data.get('picks', [])
+    exceptions = data.get('exceptions', {})
     so_num = data.get('so', '')
     batch_id = data.get('batch_id') or str(uuid.uuid4())
     device_id = '' 
@@ -381,7 +380,9 @@ def process_batch_scan():
     
     if not picks: return jsonify({'status': 'error', 'msg': 'No picks to submit!'})
 
-    logging.info(f"--- PROCESSING BATCH {batch_id} (FULL COMMIT) ---")
+    is_simulation = app.config.get('SIMULATION_MODE', False)
+    mode_str = "SIMULATION (ROLLBACK)" if is_simulation else "FULL COMMIT"
+    logging.info(f"--- PROCESSING BATCH {batch_id} ({mode_str}) ---")
 
     conn = get_db_connection()
     if not conn: return jsonify({'status': 'error', 'msg': 'Database Unavailable'})
@@ -406,10 +407,9 @@ def process_batch_scan():
             line_updates[line_no]['qty'] += qty
 
         # ===================================================================
-        # PRE-COMMIT VALIDATION PHASE (read-only checks before any UPDATE)
+        # PRE-COMMIT VALIDATION PHASE
         # ===================================================================
 
-        # --- VALIDATE 1: ScanOnhand2 — enough available stock per pick ---
         for pick in picks:
             item = pick.get('item', '').strip()
             bin_val = pick.get('bin', '').strip()
@@ -440,7 +440,6 @@ def process_batch_scan():
                     f"available={available} (onhand={current_onhand}, alloc={current_alloc}), requested={qty}."
                 )
 
-        # --- VALIDATE 2: SOTRAN — enough remaining qty per order line ---
         for line_no, line_data in line_updates.items():
             agg_qty = line_data['qty']
             item_code = line_data['item']
@@ -454,21 +453,16 @@ def process_batch_scan():
             so_row = cursor.fetchone()
 
             if not so_row:
-                raise Exception(
-                    f"PRE-CHECK FAILED: Order line {line_no} for item '{item_code}' on SO '{so_num}' not found."
-                )
+                raise Exception(f"PRE-CHECK FAILED: Order line {line_no} for item '{item_code}' on SO '{so_num}' not found.")
 
             remaining = int(so_row[2] or 0)
             if remaining < agg_qty:
-                raise Exception(
-                    f"PRE-CHECK FAILED: Order line {line_no} (item '{item_code}') — "
-                    f"remaining={remaining}, requested={agg_qty}. Would over-ship."
-                )
+                raise Exception(f"PRE-CHECK FAILED: Order line {line_no} (item '{item_code}') — remaining={remaining}, requested={agg_qty}. Would over-ship.")
 
         logging.info(f"Batch {batch_id}: All pre-commit validations passed.")
 
         # ===================================================================
-        # PART 1: Inventory Update (ScanOnhand2) — with SQL-level guard
+        # PART 1: Inventory Update (ScanOnhand2)
         # ===================================================================
         for pick in picks:
             item = pick.get('item', '').strip()
@@ -489,26 +483,18 @@ def process_batch_scan():
             cursor.execute(update_inv_sql, (qty, qty, user_id, item, bin_val, user_loc, qty))
             
             if cursor.rowcount == 0:
-                raise Exception(
-                    f"INVENTORY GUARD: Update rejected for item '{item}' at bin '{bin_val}'. "
-                    f"Insufficient available stock or row not found (concurrent pick likely)."
-                )
+                raise Exception(f"INVENTORY GUARD: Update rejected for item '{item}' at bin '{bin_val}'. Insufficient available stock or row not found (concurrent pick likely).")
 
         # ===================================================================
-        # PART 2: Sales Order Update (SOTRAN) — with SQL-level guard
+        # PART 2: Sales Order Update (SOTRAN)
         # ===================================================================
-        # Store expected shipqty for post-commit verification
         expected_shipqty = {}
 
         for line_no, line_data in line_updates.items():
             agg_qty = line_data['qty']
             item_code = line_data['item']
 
-            # Read current shipqty to compute expected value after update
-            cursor.execute(
-                f"SELECT shipqty FROM {Config.DB_ORDERS}.dbo.SOTRAN WHERE sono=? AND tranlineno=? AND item=?",
-                (so_num, line_no, item_code)
-            )
+            cursor.execute(f"SELECT shipqty FROM {Config.DB_ORDERS}.dbo.SOTRAN WHERE sono=? AND tranlineno=? AND item=?", (so_num, line_no, item_code))
             pre_row = cursor.fetchone()
             pre_shipqty = int(pre_row[0] or 0) if pre_row else 0
             expected_shipqty[line_no] = pre_shipqty + agg_qty
@@ -523,13 +509,10 @@ def process_batch_scan():
             cursor.execute(update_so_sql, (agg_qty, so_num, line_no, item_code, agg_qty))
             
             if cursor.rowcount == 0:
-                raise Exception(
-                    f"ORDER GUARD: Update rejected for line {line_no} (item '{item_code}'). "
-                    f"Remaining qty insufficient or row not found (concurrent pick likely)."
-                )
+                raise Exception(f"ORDER GUARD: Update rejected for line {line_no} (item '{item_code}'). Remaining qty insufficient or row not found.")
 
         # ===================================================================
-        # PART 3: Audit Log (ScanBinTran2) — batch_id stored in scanresult
+        # PART 3: Audit Log (ScanBinTran2)
         # ===================================================================
         for pick in picks:
             line_no = pick.get('lineNo')
@@ -537,6 +520,9 @@ def process_batch_scan():
             item = pick.get('item', '').strip()
             bin_val = pick.get('bin', '').strip()
             upc_val = item 
+            
+            # Fetch exception code for this line (defaults to blank per instructions)
+            exception_code = exceptions.get(str(line_no), '')
 
             insert_sql = f"""
                 INSERT INTO {Config.DB_AUTH}.dbo.ScanBinTran2 
@@ -545,47 +531,49 @@ def process_batch_scan():
             """
             cursor.execute(insert_sql, (
                 'SP', 'SO', so_num, line_no, upc_val, item, bin_val, qty,
-                user_id, device_id, '', ''
+                user_id, device_id, '', exception_code
             ))
 
         # ===================================================================
-        # FINAL COMMIT
+        # FINAL COMMIT / ROLLBACK (Simulation Mode)
         # ===================================================================
-        conn.commit()
-        logging.info(f"--- COMMITTED BATCH {batch_id}: {len(picks)} picks ---")
+        if is_simulation:
+            conn.rollback()
+            logging.info(f"--- SIMULATION MODE: ROLLED BACK BATCH {batch_id} ---")
+        else:
+            conn.commit()
+            logging.info(f"--- COMMITTED BATCH {batch_id}: {len(picks)} picks ---")
 
         # ===================================================================
-        # POST-COMMIT VERIFICATION (read-only — log alerts, never rollback)
+        # POST-COMMIT VERIFICATION
         # ===================================================================
         post_warnings = []
 
-        try:
-            # Verify: SOTRAN shipqty matches expected
-            for line_no, expected_val in expected_shipqty.items():
-                item_code = line_updates[line_no]['item']
-                cursor.execute(
-                    f"SELECT shipqty FROM {Config.DB_ORDERS}.dbo.SOTRAN WHERE sono=? AND tranlineno=? AND item=?",
-                    (so_num, line_no, item_code)
-                )
-                post_row = cursor.fetchone()
-                actual_shipqty = int(post_row[0] or 0) if post_row else -1
+        if not is_simulation:
+            try:
+                for line_no, expected_val in expected_shipqty.items():
+                    item_code = line_updates[line_no]['item']
+                    cursor.execute(f"SELECT shipqty FROM {Config.DB_ORDERS}.dbo.SOTRAN WHERE sono=? AND tranlineno=? AND item=?", (so_num, line_no, item_code))
+                    post_row = cursor.fetchone()
+                    actual_shipqty = int(post_row[0] or 0) if post_row else -1
 
-                if actual_shipqty != expected_val:
-                    warn = (
-                        f"POST-CHECK WARN: Line {line_no} (item '{item_code}') — "
-                        f"expected shipqty={expected_val}, actual={actual_shipqty}."
-                    )
-                    logging.critical(warn)
-                    post_warnings.append(warn)
+                    if actual_shipqty != expected_val:
+                        warn = f"POST-CHECK WARN: Line {line_no} (item '{item_code}') — expected shipqty={expected_val}, actual={actual_shipqty}."
+                        logging.critical(warn)
+                        post_warnings.append(warn)
 
-        except Exception as pve:
-            logging.critical(f"POST-CHECK ERROR (non-fatal): {pve}")
-            post_warnings.append(f"Post-commit verification error: {str(pve)}")
+            except Exception as pve:
+                logging.critical(f"POST-CHECK ERROR (non-fatal): {pve}")
+                post_warnings.append(f"Post-commit verification error: {str(pve)}")
 
         # ===================================================================
         # RESPONSE
         # ===================================================================
-        msg = f"SUCCESS: Processed {len(picks)} lines.\nUpdated Inventory & Order."
+        if is_simulation:
+            msg = f"🧪 SIMULATION SUCCESS: Processed {len(picks)} lines.\n(Data rolled back safely, no database changes made.)"
+        else:
+            msg = f"SUCCESS: Processed {len(picks)} lines.\nUpdated Inventory & Order."
+            
         if post_warnings:
             msg += f"\n⚠️ {len(post_warnings)} verification warning(s) logged."
 

@@ -41,17 +41,10 @@ function showToast(m, t='info', playSound=true) {
     
     if(playSound) playBeep(t==='error'?'error':'success');
 
-    // Errors stay visible longer (4s) so the picker can read the message
     const duration = (t === 'error') ? 4000 : 2000;
     setTimeout(() => { d.style.opacity = '0'; setTimeout(() => d.remove(), 300); }, duration);
 }
 
-// --- BIN VALIDATION HELPER (Client-side safety filter) ---
-/**
- * Validates a bin value on the client side:
- * - Must be exactly 15 characters long
- * - The 5th character (index 4) must be numeric (0-9)
- */
 function isValidBin(binStr) {
     if (!binStr || binStr.length !== 15) return false;
     var ch = binStr.charAt(4);
@@ -64,7 +57,6 @@ function renderBinList(bins) {
     const l = document.getElementById('binList'); 
     l.innerHTML = ''; 
 
-    // Client-side safety filter: only show bins with 15 chars and numeric 5th character
     const filteredBins = bins.filter(b => isValidBin(b.bin));
 
     if (!filteredBins.length) { 
@@ -103,15 +95,14 @@ function renderReviewList(sessionPicks) {
     const l = document.getElementById('reviewList'); 
 
     const htmlParts = sessionPicks.map((p, i) => {
-        // Determine mode badge styling
         var modeLabel = p.mode || '—';
         var modeBg, modeColor;
         if (modeLabel === 'Auto') {
-            modeBg = '#ebf8ff'; modeColor = '#2b6cb0'; // blue tones
+            modeBg = '#ebf8ff'; modeColor = '#2b6cb0'; 
         } else if (modeLabel === 'Manual') {
-            modeBg = '#fefcbf'; modeColor = '#975a16'; // yellow/amber tones
+            modeBg = '#fefcbf'; modeColor = '#975a16'; 
         } else {
-            modeBg = '#edf2f7'; modeColor = '#718096'; // grey fallback for old data
+            modeBg = '#edf2f7'; modeColor = '#718096'; 
         }
 
         return `
@@ -128,6 +119,37 @@ function renderReviewList(sessionPicks) {
     
     l.innerHTML = htmlParts.join('');
     document.getElementById('emptyReview').style.display = sessionPicks.length ? 'none' : 'block'; 
+}
+
+// --- PRE-SUBMIT EXCEPTIONS RENDERER ---
+function renderExceptionList(shortLines) {
+    const l = document.getElementById('exceptionList');
+    
+    const EXCEPTION_CODES = [
+        {val: "", label: "-- Select Reason --"},
+        {val: "SHORT_PICK", label: "Short Pick (Not enough in bin)"},
+        {val: "DAMAGED", label: "Damaged (Found, unpickable)"},
+        {val: "NO_FIND", label: "No Find (Bin empty/Missing)"},
+        {val: "WRONG_LOC", label: "Wrong Location (Inv mismatch)"}
+    ];
+
+    let html = '';
+    shortLines.forEach(line => {
+        html += `
+        <div style="margin-bottom: 12px; padding: 12px; background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 6px;">
+            <div style="font-weight:bold; font-size:14px; color:#2d3748; margin-bottom:4px;">
+                Ln ${line.lineNo}: <span style="color:#2b6cb0;">${line.item}</span>
+            </div>
+            <div style="font-size:12px; font-weight:bold; color:#e53e3e; margin-bottom:8px;">
+                Needed: ${line.need} &nbsp;|&nbsp; Picked: ${line.picked}
+            </div>
+            <select class="scan-input exception-select" data-line="${line.lineNo}" style="width:100%; height:38px; font-size:14px; border-color:#cbd5e0;">
+                ${EXCEPTION_CODES.map(c => `<option value="${c.val}">${c.label}</option>`).join('')}
+            </select>
+        </div>`;
+    });
+    
+    l.innerHTML = html;
 }
 
 function openModal(id) { document.getElementById(id).style.display = 'flex'; }
