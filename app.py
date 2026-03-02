@@ -397,12 +397,16 @@ def process_batch_scan():
 
         # ===================================================================
         # PRE-AGGREGATE: Build line-level totals for SOTRAN validation
+        # Zero-qty picks (from Zero Pick workflow) are excluded here —
+        # they don't update inventory or SOTRAN, only the audit log.
         # ===================================================================
         line_updates = {}
         for pick in picks:
             line_no = pick.get('lineNo')
             qty = int(pick.get('qty', 0))
             item = pick.get('item', '').strip()
+            
+            if qty <= 0: continue  # Skip zero picks — audit-only
             
             if line_no not in line_updates:
                 line_updates[line_no] = {'qty': 0, 'item': item}
@@ -533,6 +537,7 @@ def process_batch_scan():
 
         # ===================================================================
         # PART 3: Audit Log (ScanBinTran2) — with exception codes
+        # Zero-qty picks ARE included here — this is their only DB write.
         # ===================================================================
         for pick in picks:
             line_no = pick.get('lineNo')
@@ -541,8 +546,11 @@ def process_batch_scan():
             bin_val = pick.get('bin', '').strip()
             upc_val = item 
 
-            # Retrieve the exception code specifically for this line
-            raw_exception = exceptions.get(str(line_no), '')
+            # Exception code priority:
+            # 1. Pick-level exception (from Zero Pick workflow — baked into the pick)
+            # 2. Top-level exceptions dict (from Short Pick exception modal)
+            # 3. Empty string (fully picked, no exception)
+            raw_exception = pick.get('exception', '') or exceptions.get(str(line_no), '')
             
             # SAFETY TRUNCATION: Force it to max 10 chars to protect the database column
             safe_exception_code = str(raw_exception)[:10] if raw_exception else ''

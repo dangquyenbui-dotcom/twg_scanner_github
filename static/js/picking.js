@@ -17,6 +17,7 @@ window.onload = function() {
     if(SO_NUMBER) { 
         loadFromLocal(); 
         updateSessionDisplay(sessionPicks); 
+        refreshZeroPickRows();
         updateMode(); 
     }
     updateStatusUI(navigator.onLine);
@@ -131,6 +132,13 @@ function handleAction(el) {
 
 function selectRow(row, itemCode, remainingQty, lineNo, upc) {
     unlockAudio();
+
+    // Block interaction if this line has a Zero Pick — must remove it from Review first
+    if (isZeroPickedLine(lineNo)) {
+        showToast("Line " + lineNo + " is Zero Picked — remove from View to re-enable", 'error');
+        return;
+    }
+
     document.querySelectorAll('.item-row').forEach(r => r.classList.remove('active-row'));
     row.classList.add('active-row');
     
@@ -329,10 +337,21 @@ function escapeHtml(str) {
  * Merges sessionPicks by lineNo + bin + item (summing qty, dropping mode).
  * This produces the EXACT same payload shape as the original code before mode was added.
  * The server receives one record per lineNo+bin+item — identical commit behavior.
+ *
+ * Zero-pick entries (qty=0, mode='Zero') are passed through individually
+ * since they carry their own exception code and should not be merged.
  */
 function mergePicksForCommit(picks) {
     var merged = {};
+    var zeroPicks = [];
+
     picks.forEach(function(p) {
+        // Zero picks pass through directly — they carry their own exception code
+        if (p.mode === 'Zero' && p.qty === 0) {
+            zeroPicks.push({ id: p.id, lineNo: p.lineNo, item: p.item, bin: p.bin || '', qty: 0, exception: p.exception || '' });
+            return;
+        }
+
         var key = p.lineNo + '|' + p.bin + '|' + p.item;
         if (merged[key]) {
             merged[key].qty += p.qty;
@@ -341,11 +360,14 @@ function mergePicksForCommit(picks) {
             merged[key] = { id: p.id, lineNo: p.lineNo, item: p.item, bin: p.bin, qty: p.qty };
         }
     });
+
     var result = [];
     for (var k in merged) {
         if (merged.hasOwnProperty(k)) result.push(merged[k]);
     }
-    return result;
+
+    // Append zero picks at the end
+    return result.concat(zeroPicks);
 }
 
 // --- EXCEPTION WORKFLOW ---
@@ -358,6 +380,14 @@ async function checkExceptionsAndSubmit() {
     var shortLines = [];
     var lineTotals = {};
 
+    // Collect exception codes already embedded in zero-pick entries
+    var preloadedExceptions = {};
+    pendingCommitPicks.forEach(function(p) {
+        if (p.qty === 0 && p.exception) {
+            preloadedExceptions[String(p.lineNo)] = p.exception;
+        }
+    });
+
     // Group the commit batch by lineNo to get total picked amount
     pendingCommitPicks.forEach(p => {
         lineTotals[p.lineNo] = (lineTotals[p.lineNo] || 0) + p.qty;
@@ -365,6 +395,9 @@ async function checkExceptionsAndSubmit() {
 
     // Check DOM for original ordered quantity (Need) vs Picked amount
     for (var lineNo in lineTotals) {
+        // Skip lines that already have a zero-pick exception — they are fully accounted for
+        if (preloadedExceptions[String(lineNo)]) continue;
+
         var row = document.getElementById('row-' + lineNo);
         if (row) {
             var needQty = parseInt(row.cells[2].innerText, 10);
@@ -382,7 +415,7 @@ async function checkExceptionsAndSubmit() {
         }
     }
 
-    // If there are partial picks, open the forced exception modal
+    // If there are partial picks (excluding zero-picks), open the forced exception modal
     if (shortLines.length > 0) {
         renderExceptionList(shortLines);
         openModal('exceptionModal');
@@ -390,7 +423,7 @@ async function checkExceptionsAndSubmit() {
         // No partial picks, go straight to regular confirmation
         var ok = await twgConfirm("CONFIRM SUBMISSION:\n\nAre you sure you want to commit " + pendingCommitPicks.length + " pick lines?");
         if (!ok) return;
-        executeSubmit(pendingCommitPicks, {});
+        executeSubmit(pendingCommitPicks, preloadedExceptions);
     }
 }
 
@@ -406,6 +439,13 @@ function confirmExceptionsAndSubmit() {
         }
         exceptions[selects[i].dataset.line] = selects[i].value;
     }
+
+    // Merge in any pre-loaded zero-pick exceptions (these were set during zero-pick workflow)
+    pendingCommitPicks.forEach(function(p) {
+        if (p.qty === 0 && p.exception) {
+            exceptions[String(p.lineNo)] = p.exception;
+        }
+    });
     
     closeModal('exceptionModal');
     executeSubmit(pendingCommitPicks, exceptions);
@@ -446,6 +486,155 @@ function executeSubmit(commitPicks, exceptions) {
 function resetSubmitBtn(btn, txt) { isSubmitting=false; btn.innerHTML=txt; btn.disabled=false; }
 
 // --- END EXCEPTION WORKFLOW ---
+
+// ============================================================
+// ZERO PICK WORKFLOW — Report a line as unfindable (qty=0)
+// This is entirely additive and does NOT modify any existing
+// scanning, validation, or submission logic.
+// ============================================================
+
+/**
+ * Opens the Zero Pick modal for the currently selected row.
+ * The picker must select a reason code before confirming.
+ * No bin scan or item scan is required — the picker is reporting
+ * that they could not find ANY stock for this line.
+ */
+function openZeroPickModal() {
+    if (!selectedItemCode || !selectedLineNo) {
+        showToast("Select a line first", 'error');
+        return;
+    }
+
+    // Prevent duplicate zero picks for the same line
+    var existing = sessionPicks.find(function(p) { return p.lineNo === selectedLineNo && p.mode === 'Zero'; });
+    if (existing) {
+        showToast("Line " + selectedLineNo + " already has a Zero Pick", 'error');
+        return;
+    }
+
+    // Prevent zero pick if the line already has normal picks
+    var hasNormalPicks = sessionPicks.some(function(p) { return p.lineNo === selectedLineNo && p.qty > 0; });
+    if (hasNormalPicks) {
+        showToast("Line " + selectedLineNo + " already has picks — use Submit to report short", 'error');
+        return;
+    }
+
+    // Build the modal content
+    var needQty = currentOrderMaxQty; // remaining qty for this line
+    var body = document.getElementById('zeroPickBody');
+    body.innerHTML = 
+        '<div style="padding:12px;">' +
+            '<div style="margin-bottom:12px; padding:12px; background:#fff5f5; border:2px solid #feb2b2; border-radius:6px;">' +
+                '<div style="font-weight:bold; font-size:15px; color:#2d3748; margin-bottom:4px;">' +
+                    'Line ' + selectedLineNo + ': <span style="color:#2b6cb0;">' + escapeHtml(selectedItemCode) + '</span>' +
+                '</div>' +
+                '<div style="font-size:13px; font-weight:bold; color:#e53e3e; margin-bottom:8px;">' +
+                    'Needed: ' + needQty + ' &nbsp;|&nbsp; Picking: <span style="font-size:16px;">0</span>' +
+                '</div>' +
+                '<div style="font-size:12px; color:#718096; margin-bottom:10px;">Select a reason why this line cannot be picked:</div>' +
+                '<select id="zeroPickReason" class="scan-input" style="width:100%; height:38px; font-size:14px; border-color:#cbd5e0;">' +
+                    '<option value="">-- Select Reason --</option>' +
+                    '<option value="NOFND">No Find (Bin empty / Missing)</option>' +
+                    '<option value="DMG">Damaged (Found, all unpickable)</option>' +
+                '</select>' +
+            '</div>' +
+        '</div>';
+
+    openModal('zeroPickModal');
+}
+
+/**
+ * Confirms the zero pick — validates a reason was selected,
+ * then pushes a qty=0 entry into sessionPicks with mode='Zero'
+ * and the exception code embedded directly in the pick.
+ */
+async function confirmZeroPick() {
+    var reasonSelect = document.getElementById('zeroPickReason');
+    if (!reasonSelect || !reasonSelect.value) {
+        twgAlert("Please select a reason before confirming.");
+        return;
+    }
+
+    var reason = reasonSelect.value;
+
+    // Push a zero-qty pick with the exception code baked in
+    sessionPicks.push({
+        id: Date.now(),
+        lineNo: selectedLineNo,
+        item: selectedItemCode,
+        bin: '',          // No bin — picker couldn't find stock
+        qty: 0,
+        mode: 'Zero',
+        exception: reason  // Stored directly on the pick — used at submit time
+    });
+
+    closeModal('zeroPickModal');
+    updateSessionDisplay(sessionPicks);
+    lockZeroPickRow(selectedLineNo);
+    setTimeout(saveToLocal, 0);
+    playBeep('success');
+    showToast('Zero Pick: Ln ' + selectedLineNo + ' (' + reason + ')', 'success', false);
+}
+
+// ============================================================
+// END ZERO PICK WORKFLOW
+// ============================================================
+
+// --- ZERO PICK ROW STATE HELPERS ---
+
+/**
+ * Checks if a line number currently has a Zero Pick entry in sessionPicks.
+ */
+function isZeroPickedLine(lineNo) {
+    return sessionPicks.some(function(p) { return p.lineNo === lineNo && p.mode === 'Zero' && p.qty === 0; });
+}
+
+/**
+ * Applies greyed-out styling to a row in the order grid.
+ * Called after a Zero Pick is confirmed.
+ */
+function lockZeroPickRow(lineNo) {
+    var row = document.getElementById('row-' + lineNo);
+    if (!row) return;
+    row.style.opacity = '0.4';
+    row.style.pointerEvents = 'none';
+    row.classList.remove('active-row');
+    row.classList.add('zero-picked-row');
+}
+
+/**
+ * Restores a row to its normal interactive state.
+ * Called when a Zero Pick entry is removed from the review list.
+ */
+function unlockZeroPickRow(lineNo) {
+    var row = document.getElementById('row-' + lineNo);
+    if (!row) return;
+    row.style.opacity = '1';
+    row.style.pointerEvents = '';
+    row.classList.remove('zero-picked-row');
+}
+
+/**
+ * Scans all sessionPicks and applies/removes row locks as needed.
+ * Called on page load (after restoring from localStorage) and after
+ * any pick removal to keep the grid state consistent.
+ */
+function refreshZeroPickRows() {
+    // First unlock all rows
+    document.querySelectorAll('.zero-picked-row').forEach(function(row) {
+        row.style.opacity = '1';
+        row.style.pointerEvents = '';
+        row.classList.remove('zero-picked-row');
+    });
+    // Then lock any that have zero picks
+    sessionPicks.forEach(function(p) {
+        if (p.mode === 'Zero' && p.qty === 0) {
+            lockZeroPickRow(p.lineNo);
+        }
+    });
+}
+
+// --- END ZERO PICK ROW STATE HELPERS ---
 
 function saveToLocal() {
     if(!SO_NUMBER) return;
@@ -514,14 +703,14 @@ async function removePick(i){
     var ok = await twgConfirm("Remove this entry?");
     if(ok){ 
         sessionPicks.splice(i,1); 
-        openReviewModal(); updateSessionDisplay(sessionPicks); setTimeout(saveToLocal, 0); 
+        openReviewModal(); updateSessionDisplay(sessionPicks); refreshZeroPickRows(); setTimeout(saveToLocal, 0); 
     } 
 }
 
 async function clearSession() {
     var ok = await twgConfirm("Clear ALL scanned items?");
     if(ok) { 
-        sessionPicks = []; openReviewModal(); updateSessionDisplay(sessionPicks); setTimeout(saveToLocal, 0); 
+        sessionPicks = []; openReviewModal(); updateSessionDisplay(sessionPicks); refreshZeroPickRows(); setTimeout(saveToLocal, 0); 
     }
 }
 

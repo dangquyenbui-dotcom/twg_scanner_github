@@ -111,7 +111,10 @@
 
         <form class="tc52-controls" id="scanForm" onsubmit="return false;">
             <div class="control-row disabled-control" style="justify-content: space-between;">
-                <button type="button" id="btnViewBins" class="btn-small-action" onclick="openBinModal()" style="background:#4a5568;" disabled>🔍 Bins</button>
+                <div style="display:flex; gap:4px;">
+                    <button type="button" id="btnViewBins" class="btn-small-action" onclick="openBinModal()" style="background:#4a5568;" disabled>🔍 Bins</button>
+                    <button type="button" id="btnZeroPick" class="btn-small-action" onclick="openZeroPickModal()" style="background:#e53e3e; font-size:11px;" disabled>✕ Zero Pick</button>
+                </div>
                 <div style="display:flex;">
                     <label class="mode-label"><input type="radio" name="pickMode" value="auto" checked onchange="updateMode()" disabled> Auto</label>
                     <label class="mode-label"><input type="radio" name="pickMode" value="manual" onchange="updateMode()" disabled> Manual</label>
@@ -201,6 +204,22 @@
             </div>
             <div class="modal-footer" style="text-align: center;">
                 <button onclick="confirmExceptionsAndSubmit()" class="btn-small-action" style="background:#3182ce; padding:10px 24px; height:auto; font-size:14px; width: 100%;">Confirm & Submit Batch</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ZERO PICK MODAL — for reporting 0-qty lines with a required exception reason -->
+    <div id="zeroPickModal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span style="color:#e53e3e; font-weight:800;">✕ Zero Pick</span>
+                <span onclick="closeModal('zeroPickModal')" style="font-size:20px; cursor:pointer;">&times;</span>
+            </div>
+            <div class="modal-body" id="zeroPickBody">
+                <!-- Populated dynamically by openZeroPickModal() -->
+            </div>
+            <div class="modal-footer" style="text-align: center;">
+                <button onclick="confirmZeroPick()" class="btn-small-action" style="background:#e53e3e; padding:10px 24px; height:auto; font-size:14px; width: 100%;">Confirm Zero Pick</button>
             </div>
         </div>
     </div>

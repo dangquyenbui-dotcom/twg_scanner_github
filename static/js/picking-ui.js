@@ -102,6 +102,22 @@ function renderReviewList(sessionPicks) {
     const l = document.getElementById('reviewList'); 
 
     const htmlParts = sessionPicks.map((p, i) => {
+        // --- ZERO PICK: distinct red styling with exception badge ---
+        if (p.mode === 'Zero' && p.qty === 0) {
+            var exLabel = p.exception || '—';
+            return `
+            <tr style="background:#fff5f5;">
+                <td style="color:#e53e3e; font-weight:bold;">${p.item}</td>
+                <td style="color:#a0aec0; font-style:italic;">—</td>
+                <td style="font-weight:bold; color:#e53e3e;">0</td>
+                <td style="text-align:center;">
+                    <span style="display:inline-block; background:#fed7d7; color:#c53030; font-size:10px; font-weight:700; padding:2px 6px; border-radius:3px; letter-spacing:0.3px;">${exLabel}</span>
+                </td>
+                <td><button class="btn-small-action" style="background:#e53e3e; padding: 2px 8px;" onclick="removePick(${i})">X</button></td>
+            </tr>`;
+        }
+
+        // --- NORMAL PICK: existing logic unchanged ---
         // Determine mode badge styling
         var modeLabel = p.mode || '—';
         var modeBg, modeColor;
