@@ -7,6 +7,9 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#1a202c">
     <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+    <link rel="apple-touch-icon" sizes="192x192" href="{{ url_for('static', filename='logo/twg-192.png') }}">
+    <link rel="apple-touch-icon" sizes="512x512" href="{{ url_for('static', filename='logo/twg-512.png') }}">
+    <link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='logo/twg-192.png') }}">
     
     <title>TWG Warehouse</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
@@ -200,32 +203,24 @@
         // =============================================================
         // LOGIN-SPECIFIC: Suppress fullscreen when typing in inputs
         // =============================================================
-        // The shared utils.js uses aggressive fullscreen re-entry which
-        // works great for the picking page (hardware scanner needs it).
-        // But on login, it fights the virtual keyboard. So we override
-        // the fullscreen functions HERE, only on this page.
-        // =============================================================
         (function() {
             var loginInputFocused = false;
 
-            // Track when login inputs gain/lose focus
             var inputs = document.querySelectorAll('.login-card input');
             inputs.forEach(function(el) {
                 el.addEventListener('focus', function() { 
                     loginInputFocused = true; 
                 });
                 el.addEventListener('blur', function() { 
-                    // Small delay — blur fires before the next focus when tabbing between fields
                     setTimeout(function() { loginInputFocused = false; }, 200);
                 });
             });
 
-            // Override the global enterFullscreen for this page only
             var _originalEnterFullscreen = enterFullscreen;
 
             enterFullscreen = function() {
                 if (loginInputFocused) {
-                    return Promise.resolve(); // Skip — keyboard needs to stay open
+                    return Promise.resolve();
                 }
                 return _originalEnterFullscreen();
             };
