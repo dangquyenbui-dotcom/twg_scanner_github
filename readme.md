@@ -2,7 +2,7 @@
 
 ## Project Status
 
-**Phase:** 3 — Batch Scanning with Hardened Commit Logic + Short-Pick Exception Workflow
+**Phase:** 3 — Batch Scanning with Hardened Commit Logic + Short-Pick Exception Workflow + Zero Pick Workflow
 **Current Mode:** LIVE COMMIT MODE — The application validates all logic (inventory availability, order limits, location checks) and performs live SQL `UPDATE` and `INSERT` operations against the database. All writes are wrapped in a single transaction with automatic rollback on any failure. Post-commit verification detects concurrent modifications and logs warnings without rollback.
 
 ---
@@ -285,6 +285,8 @@ The `exceptions` object is optional. It maps `tranlineno` (as string) to a short
 
 Before any database reads, picks are aggregated by `tranlineno`. Multiple picks for the same order line (e.g., from different bins) are summed into a single quantity per line. This aggregated total is used for the SOTRAN over-ship validation.
 
+**Zero-qty picks** (from the Zero Pick workflow) are excluded from this aggregation. They do not affect inventory or SOTRAN — their only purpose is to write an audit record in Phase 5.
+
 ---
 
 #### Phase 2: Pre-Commit Validation (Read-Only)
@@ -351,7 +353,7 @@ WHERE sono=? AND tranlineno=? AND item=?
 
 #### Phase 5: Audit Log Insert (ScanBinTran2)
 
-One row is inserted per pick (not per aggregated line) to maintain full granularity of which bin each unit came from.
+One row is inserted per pick (not per aggregated line) to maintain full granularity of which bin each unit came from. **Zero-qty picks are included in this phase** — this is their only database write, ensuring a full audit trail for lines the picker could not fulfill.
 
 ```sql
 INSERT INTO ScanBinTran2
@@ -359,7 +361,13 @@ INSERT INTO ScanBinTran2
 VALUES ('SP', 'SO', ?, ?, ?, ?, ?, ?, ?, '', GETDATE(), '', ?)
 ```
 
-The `scanresult` column receives the short-pick exception code for the corresponding line number (if one was provided in the request), or an empty string for fully-picked lines.
+**Exception code priority:** The `scanresult` column value is determined by checking two sources in order:
+
+1. **Pick-level exception** — embedded directly in the pick object by the Zero Pick workflow (e.g., `NOFND`, `DMG`).
+2. **Top-level exceptions dict** — collected from the Short-Pick exception modal at submit time (e.g., `SHORT`, `DMG`, `NOFND`, `BADLC`).
+3. **Empty string** — for fully-picked lines with no exception.
+
+For zero-qty picks, `quantity` is `0` and `binfr` (bin) is empty since the picker never scanned a bin. The exception code in `scanresult` records the reason.
 
 ---
 
@@ -463,18 +471,27 @@ When a scanned barcode matches a UPC (not the direct item code), a visual transl
 
 Picks are stored in a local `sessionPicks` array and persisted to `localStorage` under keys prefixed with the SO number (`twg_picks_<SO>`). This survives page refreshes and accidental navigation.
 
-**Session pick structure:**
+**Normal session pick structure:**
 ```javascript
 { id: timestamp, lineNo: 1, item: "ITEM1", bin: "BIN_CODE", qty: 5, mode: "Auto" }
 ```
 
+**Zero-pick session entry structure:**
+```javascript
+{ id: timestamp, lineNo: 3, item: "ITEM3", bin: "", qty: 0, mode: "Zero", exception: "NOFND" }
+```
+
+Zero-pick entries have `qty: 0`, `bin: ""` (no bin scanned), `mode: "Zero"`, and carry their exception code directly in the `exception` field. This distinguishes them from normal picks at every stage of the pipeline.
+
 **Deduplication:** If a pick already exists for the same `lineNo + bin + item + mode`, the quantity is incremented rather than creating a duplicate entry. Auto and Manual picks for the same line/bin/item are stored as separate rows in the review list.
 
-**Merge on commit:** Before submission, `mergePicksForCommit()` combines Auto and Manual rows for the same `lineNo + bin + item` into a single record by summing quantities. The `mode` field is dropped — the server never receives it. This ensures identical commit behavior regardless of how the picks were accumulated.
+**Merge on commit:** Before submission, `mergePicksForCommit()` combines Auto and Manual rows for the same `lineNo + bin + item` into a single record by summing quantities. The `mode` field is dropped — the server never receives it. Zero-pick entries are passed through individually without merging (they carry their own exception code in the `exception` field and are appended to the merged result). This ensures identical commit behavior regardless of how the picks were accumulated.
 
 **Guards (client-side):**
 - **Bin limit:** Total picked from a bin cannot exceed the on-hand quantity reported during bin validation.
 - **Order limit:** Total picked for a line cannot exceed the remaining order quantity (`qtyord - shipqty`).
+- **Zero-pick duplicate guard:** A line can only have one Zero Pick entry. Attempting to zero-pick a line that already has one is blocked with a toast error.
+- **Zero-pick conflict guard:** A line that already has normal picks (qty > 0) cannot be zero-picked. The picker should use the short-pick exception modal at submit time instead.
 
 ### Short-Pick Exception Workflow
 
@@ -490,6 +507,53 @@ When the user taps **Submit**, the system checks whether any order lines were on
 4. Exception codes are sent to the server in the `exceptions` object and written to the `scanresult` column in `ScanBinTran2` for each corresponding line.
 
 If all lines are fully picked (or no picks exist for some lines), the exception modal is skipped and a standard confirmation dialog appears.
+
+### Zero Pick Workflow
+
+The Zero Pick workflow allows pickers to formally report that they could not find **any** stock for an order line. This creates a full audit trail for unfulfillable lines without requiring a bin scan or item scan.
+
+**Picker flow:**
+
+1. Select the row they cannot find stock for.
+2. Tap the red **"✕ Zero Pick"** button (located next to the Bins button in the controls area).
+3. The Zero Pick modal opens, showing the line number, item code, and needed quantity.
+4. The picker **must** select one of two reason codes:
+   - `NOFND` — No Find (Bin empty / Missing)
+   - `DMG` — Damaged (Found, all unpickable)
+5. Tap **"Confirm Zero Pick"**.
+6. The line is added to the session as a zero-qty entry and the order grid row is **greyed out and locked** (40% opacity, `pointerEvents: none`).
+
+**Why only two reason codes:** Zero Pick means the picker found nothing at all for the line. "Short Pick" and "Wrong Location" are excluded because they imply the picker found *some* stock — those scenarios are handled by the short-pick exception modal at submit time.
+
+**Row lockout behavior:**
+
+Once a line has a Zero Pick, it is visually greyed out in the order grid and cannot be tapped or interacted with. This prevents accidental double-handling. The lockout is enforced at three levels:
+
+- **Visual:** Row opacity drops to 40% with a `zero-picked-row` CSS class.
+- **Pointer events:** `pointerEvents: none` on the row element blocks all tap/click events.
+- **JavaScript guard:** `selectRow()` checks `isZeroPickedLine()` and rejects the interaction with a toast message if somehow triggered.
+
+**Restoring a locked row:**
+
+The only way to undo a Zero Pick is through the **Review modal** (View button):
+
+- Tap the **X** button next to the zero-pick entry to remove it, or
+- Tap **Clear All** to remove all session picks.
+
+Both actions call `refreshZeroPickRows()` which scans the current `sessionPicks` and restores any rows that no longer have a zero-pick entry to their normal interactive state.
+
+**Page reload persistence:**
+
+On page load, after restoring `sessionPicks` from `localStorage`, `refreshZeroPickRows()` runs to re-apply the greyed-out state to any zero-picked rows. This ensures the lockout survives browser refreshes and accidental navigation.
+
+**Integration with the submit workflow:**
+
+When the picker taps Submit, zero-pick entries are handled seamlessly:
+
+- `mergePicksForCommit()` passes zero-pick entries through individually (they are not merged with normal picks).
+- `checkExceptionsAndSubmit()` collects exception codes already embedded in zero-pick entries and excludes those lines from the short-pick detection. This means zero-picked lines will never trigger the short-pick exception modal.
+- If the batch has both zero picks and short picks from other lines, both sets of exceptions are merged into a single `exceptions` dict before submission.
+- On the server, zero-qty picks skip inventory updates (`ScanOnhand2`) and sales order updates (`SOTRAN`) but still write an audit row to `ScanBinTran2` with `quantity=0` and the exception code in `scanresult`.
 
 ### Bin Cache (`picking.js`)
 
@@ -516,8 +580,9 @@ Both functions are async/Promise-based. All calling functions (`checkExceptionsA
 ### Modals
 
 - **Bin Modal:** Shows all available bins for the selected item with on-hand, allocated, and available quantities. Bins are filtered client-side using `isValidBin()`. Closeable via the X button **or by tapping the dark overlay area** outside the modal. On close, focus automatically returns to the Scan Bin input via `safeFocus('binInput')`.
-- **Review Modal:** Shows all current session picks with item, bin, quantity, mode badge (Auto/Manual), and a remove button per entry. Includes a "Clear All" option. Closeable via X button or overlay tap.
+- **Review Modal:** Shows all current session picks with item, bin, quantity, mode badge (Auto/Manual), and a remove button per entry. Zero-pick entries are rendered with a red background, "—" for bin, "0" for quantity, and a red exception badge (e.g., `NOFND`) instead of the mode badge. Includes a "Clear All" option. Closeable via X button or overlay tap.
 - **Exception Modal:** Shows short-picked lines with required reason code dropdowns. Closeable via X button or overlay tap. Submission is blocked until all reason codes are selected.
+- **Zero Pick Modal:** Shows the selected line's item code and needed quantity with a reason code dropdown (NOFND or DMG only). Closeable via X button or overlay tap. Confirmation is blocked until a reason is selected. On confirm, adds a zero-qty entry to the session and locks the corresponding order grid row.
 - **Custom Dialog (twgAlert/twgConfirm):** Dynamically created branded overlay for all confirmation and alert messages. Displays "📦 TWG WMS App" header with dark theme.
 
 ### Fullscreen Management (`utils.js`)
@@ -571,6 +636,9 @@ The application applies aggressive whitespace handling throughout:
 | Batch post-check | Try/catch, `logging.critical()` | Warnings logged and included in response, no rollback |
 | Client network | `fetch().catch()` | TWG-branded alert shown to user, submit button re-enabled |
 | Client guards | Bin limit / Order limit checks | Toast error shown, pick rejected before reaching server |
+| Zero-pick duplicate guard | `isZeroPickedLine()` check | Toast error if line already has a Zero Pick entry |
+| Zero-pick conflict guard | Normal picks exist check | Toast error if line already has qty > 0 picks (use short-pick modal instead) |
+| Zero-pick row lockout | `selectRow()` early exit | Toast error and interaction blocked on greyed-out rows |
 | Exception validation | Dropdown required for short picks | TWG-branded alert blocks submission until all reasons selected |
 
 ---
@@ -615,7 +683,7 @@ The application applies aggressive whitespace handling throughout:
 | `showToast(msg, type, playSound)` | Displays a timed notification banner (error: 4s, success: 2s) |
 | `isValidBin(binStr)` | Client-side bin validation (15 chars, numeric 5th character) |
 | `renderBinList(bins)` | Renders the bin modal table with stock levels |
-| `renderReviewList(sessionPicks)` | Renders the review modal table with mode badges |
+| `renderReviewList(sessionPicks)` | Renders the review modal table with mode badges; zero-pick entries render with red background and exception badge |
 | `renderExceptionList(shortLines)` | Renders the exception modal with reason code dropdowns |
 | `openModal(id)` | Shows a modal overlay by ID |
 | `closeModal(id)` | Hides a modal overlay by ID; returns focus to binInput if closing bin modal |
@@ -653,8 +721,14 @@ The application applies aggressive whitespace handling throughout:
 | `openBinModal()` | Opens the bin modal and triggers bin prefetch |
 | `prefetchBins(item)` | Fetches and caches bin data from `/get_item_bins` |
 | `openReviewModal()` | Opens the review modal with current session picks |
-| `removePick(i)` | Removes a single pick entry after TWG-branded confirmation |
-| `clearSession()` | Clears all picks after TWG-branded confirmation |
+| `removePick(i)` | Removes a single pick entry after TWG-branded confirmation; refreshes zero-pick row locks |
+| `clearSession()` | Clears all picks after TWG-branded confirmation; refreshes zero-pick row locks |
+| `openZeroPickModal()` | Opens the Zero Pick modal for the currently selected line; blocks if line already has a zero pick or normal picks |
+| `confirmZeroPick()` | Validates reason code selected, pushes zero-qty entry to sessionPicks, locks the order grid row |
+| `isZeroPickedLine(lineNo)` | Returns true if the given line number has a Zero Pick entry in sessionPicks |
+| `lockZeroPickRow(lineNo)` | Greys out an order grid row (40% opacity, pointerEvents disabled) after a Zero Pick |
+| `unlockZeroPickRow(lineNo)` | Restores an order grid row to normal interactive state |
+| `refreshZeroPickRows()` | Scans sessionPicks and applies/removes row locks; called on page load, removePick, and clearSession |
 | `toggleKeyboard(id)` | Toggles virtual keyboard visibility on an input |
 | `safeFocus(id)` | Focuses an input with `inputMode='none'` to prevent keyboard popup |
 | `adjustQty(n)` | Increments/decrements the quantity input in Manual mode |
