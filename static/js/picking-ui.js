@@ -41,10 +41,17 @@ function showToast(m, t='info', playSound=true) {
     
     if(playSound) playBeep(t==='error'?'error':'success');
 
+    // Errors stay visible longer (4s) so the picker can read the message
     const duration = (t === 'error') ? 4000 : 2000;
     setTimeout(() => { d.style.opacity = '0'; setTimeout(() => d.remove(), 300); }, duration);
 }
 
+// --- BIN VALIDATION HELPER (Client-side safety filter) ---
+/**
+ * Validates a bin value on the client side:
+ * - Must be exactly 15 characters long
+ * - The 5th character (index 4) must be numeric (0-9)
+ */
 function isValidBin(binStr) {
     if (!binStr || binStr.length !== 15) return false;
     var ch = binStr.charAt(4);
@@ -57,6 +64,7 @@ function renderBinList(bins) {
     const l = document.getElementById('binList'); 
     l.innerHTML = ''; 
 
+    // Client-side safety filter: only show bins with 15 chars and numeric 5th character
     const filteredBins = bins.filter(b => isValidBin(b.bin));
 
     if (!filteredBins.length) { 
@@ -95,14 +103,15 @@ function renderReviewList(sessionPicks) {
     const l = document.getElementById('reviewList'); 
 
     const htmlParts = sessionPicks.map((p, i) => {
+        // Determine mode badge styling
         var modeLabel = p.mode || '—';
         var modeBg, modeColor;
         if (modeLabel === 'Auto') {
-            modeBg = '#ebf8ff'; modeColor = '#2b6cb0'; 
+            modeBg = '#ebf8ff'; modeColor = '#2b6cb0'; // blue tones
         } else if (modeLabel === 'Manual') {
-            modeBg = '#fefcbf'; modeColor = '#975a16'; 
+            modeBg = '#fefcbf'; modeColor = '#975a16'; // yellow/amber tones
         } else {
-            modeBg = '#edf2f7'; modeColor = '#718096'; 
+            modeBg = '#edf2f7'; modeColor = '#718096'; // grey fallback for old data
         }
 
         return `
