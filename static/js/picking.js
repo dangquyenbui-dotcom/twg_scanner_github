@@ -33,12 +33,35 @@ window.addEventListener('offline', () => updateStatusUI(false));
 
 // --- SCANNER LOGIC ---
 
+/**
+ * Determines if the user is actively typing via a virtual (on-screen) keyboard.
+ * Hardware barcode scanners inject text with inputMode='none' or very rapidly,
+ * while virtual keyboard users will have inputMode set to 'text', 'numeric', etc.
+ */
 function isVirtualKeyboardActive(el) {
     return el.inputMode && el.inputMode !== 'none';
 }
 
+/**
+ * Strips leading and trailing alphabetic characters from a scanned string,
+ * BUT ONLY if BOTH ends have alpha wrapping AND the remaining core is purely numeric.
+ * This matches the specific DataWedge pattern where a symbology identifier
+ * character is added to both ends of a numeric UPC barcode (e.g. 'A729419150129A').
+ *
+ * Examples:
+ *   'A729419150129A' → '729419150129'  (alpha on BOTH ends, core all digits → strip)
+ *   'ABC12345'       → 'ABC12345'      (alpha only on left end → leave as-is)
+ *   '12345ABC'       → '12345ABC'      (alpha only on right end → leave as-is)
+ *   'WIDGET-X'       → 'WIDGET-X'      (not numeric core → leave as-is)
+ *   'X100'           → 'X100'          (alpha only on left end → leave as-is)
+ *   '729419150129'   → '729419150129'  (no wrapping chars → unchanged)
+ *
+ * This is ONLY used for item/UPC scan comparison in handleItemScan().
+ * It does NOT affect bin scanning, SO input, or any server-side data.
+ */
 function stripWrappingAlpha(str) {
     if (!str) return str;
+    // Only match if string starts with letter(s), ends with letter(s), and has digits in between
     var match = str.match(/^[A-Za-z]+(\d+)[A-Za-z]+$/);
     if (match) {
         return match[1];
@@ -70,6 +93,7 @@ function attachScannerListeners() {
                 return; 
             }
 
+            // --- FIX: Only auto-trigger if virtual keyboard is NOT active ---
             if (isVirtualKeyboardActive(el)) {
                 log(`Virtual keyboard active on ${el.id} — waiting for Enter key.`);
                 return;
@@ -121,16 +145,18 @@ function selectRow(row, itemCode, remainingQty, lineNo, upc) {
     
     currentOrderMaxQty = remainingQty;
     
-    // Enable controls
+    // --- ENABLE CONTROLS ON SELECTION ---
     document.querySelectorAll('.disabled-control').forEach(el => el.classList.remove('disabled-control'));
     document.getElementById('scanForm').querySelectorAll('input, button').forEach(el => el.disabled = false);
     
+    // Reset placeholders
     document.getElementById('binInput').placeholder = "Scan Bin...";
     document.getElementById('itemInput').placeholder = "Scan Item...";
     
     document.getElementById('binInput').value = ''; 
     document.getElementById('itemInput').value = '';
     
+    // Hide UPC badge on new row selection
     hideUpcBadge();
     
     updateSessionDisplay(sessionPicks);
@@ -138,6 +164,7 @@ function selectRow(row, itemCode, remainingQty, lineNo, upc) {
     setTimeout(() => safeFocus('binInput'), 100);
     prefetchBins(selectedItemCode);
 
+    // Update the keyboard context bar with selected item info
     if (typeof window.updateContextBar === 'function') {
         window.updateContextBar();
     }
@@ -168,6 +195,7 @@ function verifySuccess(qty, bin) {
     showToast(`Verified. Max: ${qty}`, 'success'); 
     safeFocus('itemInput');
 
+    // Update context bar with bin info
     if (typeof window.updateContextBar === 'function') {
         window.updateContextBar();
     }
@@ -180,6 +208,7 @@ function addToSession() {
     let qty = isAutoMode ? 1 : (parseFloat(document.getElementById('qtyInput').value)||0);
     if(qty <= 0) return;
 
+    // --- Client-side guards use MERGED totals (lineNo+bin+item, ignoring mode) ---
     const currentLineTotal = sessionPicks.filter(p => p.lineNo === selectedLineNo).reduce((s,p) => s + p.qty, 0);
     const currentBinTotal = sessionPicks.filter(p => p.item === selectedItemCode && p.bin === currentBin).reduce((s,p) => s + p.qty, 0);
     
@@ -188,8 +217,10 @@ function addToSession() {
 
     playBeep('success');
 
+    // Determine current pick mode label
     var pickModeLabel = isAutoMode ? 'Auto' : 'Manual';
 
+    // Deduplication includes mode — so Auto and Manual show as SEPARATE rows in View Scanned
     const existingIndex = sessionPicks.findIndex(p => p.lineNo === selectedLineNo && p.bin === currentBin && p.item === selectedItemCode && p.mode === pickModeLabel);
     
     if (existingIndex > -1) {
@@ -212,6 +243,9 @@ function addToSession() {
 function resetInputAfterAdd(success) {
     if(isAutoMode) {
         document.getElementById('itemInput').value = '';
+        // NOTE: Do NOT hide UPC badge here — let it stay visible so the picker
+        // can see the translation confirmation. It will hide on the next scan
+        // cycle (new input into itemInput, row change, or mismatch).
         setTimeout(() => safeFocus('itemInput'), 50);
     } else if(success) {
         document.getElementById('qtyInput').value = 1;
@@ -222,7 +256,10 @@ function handleItemScan() {
     const rawScan = document.getElementById('itemInput').value.trim();
     if(!selectedItemCode || !rawScan) return;
     
+    // Strip leading/trailing alpha characters that some scanners add (e.g. 'A729419150129A' → '729419150129')
+    // This only affects the comparison — selectedItemCode (used for submission) is untouched.
     const scan = stripWrappingAlpha(rawScan);
+
     const scanNorm = scan.toLowerCase();
     const itemNorm = (selectedItemCode || "").trim().toLowerCase();
     const upcNorm = selectedUpc ? selectedUpc.toLowerCase() : "";
@@ -239,6 +276,7 @@ function handleItemScan() {
         return;
     }
     
+    // Show UPC translation badge if matched via UPC (not direct item code)
     if (isUpcMatch && !isDirectMatch) {
         showUpcBadge(scan, selectedItemCode);
     } else {
@@ -248,6 +286,8 @@ function handleItemScan() {
     if (isAutoMode) addToSession();
     else document.getElementById('qtyInput').focus();
 }
+
+// --- UPC TRANSLATION BADGE ---
 
 function showUpcBadge(upcValue, itemCode) {
     var badge = document.getElementById('upcBadge');
@@ -262,6 +302,7 @@ function showUpcBadge(upcValue, itemCode) {
             ' <span class="upc-badge-check">\u2713</span>';
     }
     
+    // Force reflow so transition plays even if already visible
     badge.classList.remove('upc-badge-visible');
     badge.classList.add('upc-badge-hidden');
     void badge.offsetWidth;
@@ -282,6 +323,13 @@ function escapeHtml(str) {
     return div.innerHTML;
 }
 
+// --- END UPC BADGE ---
+
+/**
+ * Merges sessionPicks by lineNo + bin + item (summing qty, dropping mode).
+ * This produces the EXACT same payload shape as the original code before mode was added.
+ * The server receives one record per lineNo+bin+item — identical commit behavior.
+ */
 function mergePicksForCommit(picks) {
     var merged = {};
     picks.forEach(function(p) {
@@ -289,6 +337,7 @@ function mergePicksForCommit(picks) {
         if (merged[key]) {
             merged[key].qty += p.qty;
         } else {
+            // Clone without mode — server never sees mode field
             merged[key] = { id: p.id, lineNo: p.lineNo, item: p.item, bin: p.bin, qty: p.qty };
         }
     });
@@ -299,7 +348,7 @@ function mergePicksForCommit(picks) {
     return result;
 }
 
-// --- NEW EXCEPTION WORKFLOW ---
+// --- EXCEPTION WORKFLOW ---
 
 function checkExceptionsAndSubmit() {
     if(isSubmitting || sessionPicks.length === 0) return;
@@ -361,7 +410,6 @@ function confirmExceptionsAndSubmit() {
     executeSubmit(pendingCommitPicks, exceptions);
 }
 
-// Previously called submitFinal()
 function executeSubmit(commitPicks, exceptions) {
     isSubmitting = true;
     const btn = document.getElementById('btnSubmit'); 

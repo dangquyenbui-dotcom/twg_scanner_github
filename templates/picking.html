@@ -104,6 +104,7 @@
             </table>
         </div>
 
+        <!-- Context bar: shows selected item info when keyboard covers the grid -->
         <div class="keyboard-context-bar" id="keyboardContextBar">
             <span id="contextItemInfo">No item selected</span>
         </div>
@@ -131,6 +132,7 @@
                 </div>
             </div>
 
+            <!-- UPC Translation Badge — shows when a UPC barcode is matched to an item -->
             <div id="upcBadge" class="upc-badge upc-badge-hidden">
                 <span id="upcBadgeText" class="upc-badge-inner"></span>
             </div>
@@ -215,15 +217,19 @@
     <script src="{{ url_for('static', filename='js/picking-ui.js') }}"></script>
     <script src="{{ url_for('static', filename='js/picking.js') }}"></script>
 
+    <!-- KEYBOARD-AWARE VIEWPORT HANDLER -->
     <script>
     (function() {
         var layout = document.getElementById('tc52Layout');
-        if (!layout) return;
+        if (!layout) return; // Only run on the picking screen with SO loaded
 
         var contextBar = document.getElementById('keyboardContextBar');
         var keyboardOpen = false;
         var originalHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
 
+        /**
+         * Updates the context bar text with the currently selected item info.
+         */
         function updateContextBar() {
             if (!contextBar) return;
             if (typeof selectedItemCode !== 'undefined' && selectedItemCode) {
@@ -237,6 +243,10 @@
             }
         }
 
+        /**
+         * Handles viewport resize — detects virtual keyboard open/close
+         * and adjusts the fixed layout height so controls stay visible.
+         */
         function handleViewportResize() {
             var viewportHeight;
             var offsetTop = 0;
@@ -248,6 +258,7 @@
                 viewportHeight = window.innerHeight;
             }
 
+            // Keyboard is considered "open" if viewport shrinks by more than 80px
             var heightDiff = originalHeight - viewportHeight;
             var isKeyboardNow = heightDiff > 80;
 

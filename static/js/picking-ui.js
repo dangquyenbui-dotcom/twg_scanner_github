@@ -41,7 +41,6 @@ function showToast(m, t='info', playSound=true) {
     
     if(playSound) playBeep(t==='error'?'error':'success');
 
-    // Errors stay visible longer (4s) so the picker can read the message
     const duration = (t === 'error') ? 4000 : 2000;
     setTimeout(() => { d.style.opacity = '0'; setTimeout(() => d.remove(), 300); }, duration);
 }
@@ -163,4 +162,26 @@ function renderExceptionList(shortLines) {
 }
 
 function openModal(id) { document.getElementById(id).style.display = 'flex'; }
-function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+function closeModal(id) { 
+    document.getElementById(id).style.display = 'none'; 
+    // After closing the bin modal, return focus to Scan Bin input
+    if (id === 'binModal') {
+        setTimeout(function() { safeFocus('binInput'); }, 100);
+    }
+}
+
+// --- CLOSE MODAL ON OUTSIDE TAP ---
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.modal-overlay').forEach(function(overlay) {
+        overlay.addEventListener('click', function(e) {
+            // Only close if the tap was on the dark overlay itself, not on modal content
+            if (e.target === overlay) {
+                overlay.style.display = 'none';
+                // After closing the bin modal, return focus to Scan Bin input
+                if (overlay.id === 'binModal') {
+                    setTimeout(function() { safeFocus('binInput'); }, 100);
+                }
+            }
+        });
+    });
+});
