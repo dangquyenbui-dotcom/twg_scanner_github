@@ -79,11 +79,12 @@ function renderBinList(bins) {
                     <th style="text-align:center; padding:8px; border-bottom:2px solid #cbd5e0;">On Hand</th>
                     <th style="text-align:center; padding:8px; border-bottom:2px solid #cbd5e0;">Alloc</th>
                     <th style="text-align:center; padding:8px; border-bottom:2px solid #cbd5e0;">Avail</th>
+                    <th style="text-align:center; padding:8px; border-bottom:2px solid #cbd5e0; width:40px;">IC</th>
                 </tr>
             </thead>
             <tbody>`;
 
-    filteredBins.forEach(b => { 
+    filteredBins.forEach((b, idx) => { 
         const availStyle = b.avail > 0 ? 'font-weight:bold; color:#2d3748;' : 'color:#a0aec0;';
         html += `
             <tr style="border-bottom:1px solid #e2e8f0;">
@@ -91,10 +92,18 @@ function renderBinList(bins) {
                 <td style="text-align:center; padding:10px 8px; font-size:14px;">${b.qty}</td>
                 <td style="text-align:center; padding:10px 8px; font-size:14px; color:#e53e3e;">${b.alloc}</td>
                 <td style="text-align:center; padding:10px 8px; font-size:14px; ${availStyle}">${b.avail}</td>
+                <td style="text-align:center; padding:10px 4px;">
+                    <button class="btn-report-bin" 
+                            onclick="openBinReportModal('${b.bin}', ${b.qty}, ${b.alloc}, ${b.avail})"
+                            title="Report this bin to IC team"
+                            style="background:none; border:1px solid #dd6b20; border-radius:4px; width:32px; height:32px; font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0; color:#dd6b20; transition: background 0.15s, color 0.15s;">
+                        🚩
+                    </button>
+                </td>
             </tr>`;
     });
 
-    html += `</tbody></table><div style="text-align:right; font-size:10px; color:#a0aec0; padding:5px;">Tap outside to close</div>`;
+    html += `</tbody></table><div style="text-align:right; font-size:10px; color:#a0aec0; padding:5px;">🚩 = Report bin to IC team &nbsp;|&nbsp; Tap outside to close</div>`;
     l.innerHTML = html;
 }
 
@@ -201,6 +210,122 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 });
+
+// ============================================================
+// BIN REPORT TO IC — opens a lightweight modal from the bin list
+// so the picker can flag a bin for IC team investigation.
+// Email is sent in the background; picker gets instant feedback.
+// ============================================================
+
+var _reportBinData = {};
+
+/**
+ * Opens the Bin Report modal pre-filled with bin details.
+ * Called from the 🚩 button in the Available Bins list.
+ */
+function openBinReportModal(bin, onhand, alloc, avail) {
+    _reportBinData = {
+        bin: bin,
+        onhand: onhand,
+        alloc: alloc,
+        avail: avail,
+        item: (typeof selectedItemCode !== 'undefined') ? selectedItemCode : ''
+    };
+
+    var body = document.getElementById('binReportBody');
+    body.innerHTML = 
+        '<div style="padding:12px;">' +
+            '<div style="margin-bottom:12px; padding:12px; background:#fffbeb; border:2px solid #f6e05e; border-radius:6px;">' +
+                '<div style="font-weight:bold; font-size:15px; color:#2d3748; margin-bottom:6px;">' +
+                    '🚩 Reporting Bin: <span style="color:#2b6cb0;">' + bin + '</span>' +
+                '</div>' +
+                '<div style="font-size:12px; color:#4a5568; margin-bottom:2px;">' +
+                    'Item: <strong>' + (_reportBinData.item || 'N/A') + '</strong>' +
+                '</div>' +
+                '<div style="font-size:12px; color:#4a5568;">' +
+                    'On Hand: ' + onhand + ' &nbsp;|&nbsp; Alloc: ' + alloc + ' &nbsp;|&nbsp; Avail: ' + avail +
+                '</div>' +
+            '</div>' +
+            '<div style="margin-bottom:10px;">' +
+                '<label style="display:block; font-weight:700; font-size:11px; color:#4a5568; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:5px;">Issue Type *</label>' +
+                '<select id="binReportReason" class="scan-input" style="width:100%; height:38px; font-size:14px; border-color:#cbd5e0;">' +
+                    '<option value="">-- Select Issue --</option>' +
+                    '<option value="Qty Mismatch">Qty Mismatch (System vs Physical)</option>' +
+                    '<option value="Label Issue">Label Issue (Wrong/Missing/Damaged)</option>' +
+                    '<option value="Damaged Product">Damaged Product</option>' +
+                    '<option value="Wrong Item in Bin">Wrong Item in Bin</option>' +
+                    '<option value="Bin Disorganized">Bin Disorganized / Mixed SKUs</option>' +
+                    '<option value="Safety Hazard">Safety Hazard</option>' +
+                    '<option value="Other">Other (see notes)</option>' +
+                '</select>' +
+            '</div>' +
+            '<div>' +
+                '<label style="display:block; font-weight:700; font-size:11px; color:#4a5568; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:5px;">Notes (optional)</label>' +
+                '<textarea id="binReportNotes" class="scan-input" style="width:100%; height:60px; font-size:13px; border-color:#cbd5e0; padding:8px; resize:none;" placeholder="Describe the issue..." maxlength="500"></textarea>' +
+            '</div>' +
+        '</div>';
+
+    openModal('binReportModal');
+}
+
+/**
+ * Submits the bin report to the server. The server sends
+ * the email in a background thread and responds instantly.
+ */
+function submitBinReport() {
+    var reason = document.getElementById('binReportReason').value;
+    if (!reason) {
+        twgAlert("Please select an issue type before submitting.");
+        return;
+    }
+
+    var notes = document.getElementById('binReportNotes').value.trim();
+    var soNumber = (typeof SO_NUMBER !== 'undefined') ? SO_NUMBER : '';
+
+    var payload = {
+        bin: _reportBinData.bin,
+        item: _reportBinData.item,
+        onhand: _reportBinData.onhand,
+        alloc: _reportBinData.alloc,
+        avail: _reportBinData.avail,
+        reason: reason,
+        notes: notes,
+        so: soNumber
+    };
+
+    // Disable button while sending
+    var btn = document.getElementById('btnSubmitBinReport');
+    var originalText = btn.innerHTML;
+    btn.innerHTML = '⏳ Sending...';
+    btn.disabled = true;
+
+    fetch('/report_bin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+        closeModal('binReportModal');
+        if (d.status === 'success') {
+            showToast('✅ Bin ' + _reportBinData.bin + ' reported to IC', 'success');
+        } else {
+            showToast('Report failed: ' + (d.msg || 'Unknown error'), 'error');
+        }
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    })
+    .catch(function(e) {
+        closeModal('binReportModal');
+        showToast('Network error — report not sent', 'error');
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    });
+}
+
+// ============================================================
+// END BIN REPORT TO IC
+// ============================================================
 
 // ============================================================
 // CUSTOM DIALOGS — replaces browser alert() and confirm()

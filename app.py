@@ -4,6 +4,10 @@ import pyodbc
 import logging
 import datetime
 import uuid
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import threading
 
 # Configure Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -102,6 +106,178 @@ def is_valid_bin(bin_value):
     if not bin_value[4].isdigit():
         return False
     return True
+
+
+# ===================================================================
+# EMAIL HELPER — Sends bin report emails in a background thread
+# so the picker's workflow is never blocked by SMTP latency.
+# ===================================================================
+
+def send_bin_report_email(report_data):
+    """
+    Sends a professional bin report email to the IC team via Office 365 SMTP.
+    Runs in a background thread — caller does not wait for completion.
+    """
+    def _send():
+        try:
+            smtp_server = app.config['SMTP_SERVER']
+            smtp_port = app.config['SMTP_PORT']
+            smtp_user = app.config['SMTP_USER']
+            smtp_password = app.config['SMTP_PASSWORD']
+            ic_email = app.config['IC_EMAIL']
+
+            if not smtp_user or not ic_email:
+                logging.error("BIN REPORT EMAIL: SMTP_USER or IC_EMAIL not configured.")
+                return
+
+            # Build subject line
+            subject = (
+                f"[IC Action Required] Bin Report — "
+                f"{report_data.get('bin', 'N/A')} | "
+                f"{report_data.get('reason', 'Issue Reported')} | "
+                f"Item {report_data.get('item', 'N/A')}"
+            )
+
+            # Build HTML email body
+            timestamp = report_data.get('timestamp', datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            html_body = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; color: #2d3748; margin: 0; padding: 0; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ background: #1a202c; padding: 18px 24px; border-radius: 8px 8px 0 0; }}
+        .header h1 {{ color: #ffffff; font-size: 18px; margin: 0; font-weight: 700; letter-spacing: 0.3px; }}
+        .header .subtitle {{ color: #a0aec0; font-size: 12px; margin-top: 4px; text-transform: uppercase; letter-spacing: 1px; }}
+        .alert-banner {{ background: #fff5f5; border-left: 4px solid #e53e3e; padding: 14px 18px; margin: 0; }}
+        .alert-banner .reason {{ color: #c53030; font-weight: 700; font-size: 16px; }}
+        .body {{ background: #ffffff; border: 1px solid #e2e8f0; border-top: none; padding: 24px; }}
+        .detail-grid {{ width: 100%; border-collapse: collapse; margin-bottom: 16px; }}
+        .detail-grid td {{ padding: 10px 14px; border-bottom: 1px solid #edf2f7; font-size: 14px; }}
+        .detail-grid .label {{ color: #718096; font-weight: 600; width: 140px; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; vertical-align: top; }}
+        .detail-grid .value {{ color: #2d3748; font-weight: 500; }}
+        .detail-grid .value.highlight {{ color: #2b6cb0; font-weight: 700; font-size: 16px; }}
+        .notes-section {{ background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 14px 16px; margin-top: 8px; }}
+        .notes-section .notes-label {{ color: #718096; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }}
+        .notes-section .notes-text {{ color: #4a5568; font-size: 14px; line-height: 1.5; }}
+        .footer {{ background: #f7fafc; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px; padding: 14px 24px; text-align: center; }}
+        .footer p {{ color: #a0aec0; font-size: 11px; margin: 0; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Bin Inspection Report</h1>
+            <div class="subtitle">TWG Warehouse Management System</div>
+        </div>
+
+        <div class="alert-banner">
+            <span class="reason">⚠️ {report_data.get('reason', 'Issue Reported')}</span>
+        </div>
+
+        <div class="body">
+            <table class="detail-grid">
+                <tr>
+                    <td class="label">Bin Location</td>
+                    <td class="value highlight">{report_data.get('bin', 'N/A')}</td>
+                </tr>
+                <tr>
+                    <td class="label">Item Code</td>
+                    <td class="value highlight">{report_data.get('item', 'N/A')}</td>
+                </tr>
+                <tr>
+                    <td class="label">On-Hand Qty</td>
+                    <td class="value">{report_data.get('onhand', 'N/A')}</td>
+                </tr>
+                <tr>
+                    <td class="label">Allocated Qty</td>
+                    <td class="value">{report_data.get('alloc', 'N/A')}</td>
+                </tr>
+                <tr>
+                    <td class="label">Available Qty</td>
+                    <td class="value">{report_data.get('avail', 'N/A')}</td>
+                </tr>
+                <tr>
+                    <td class="label">Warehouse</td>
+                    <td class="value">{report_data.get('location', 'N/A')}</td>
+                </tr>
+                <tr>
+                    <td class="label">Sales Order</td>
+                    <td class="value">{report_data.get('so', 'N/A')}</td>
+                </tr>
+                <tr>
+                    <td class="label">Reported By</td>
+                    <td class="value">{report_data.get('picker', 'N/A')}</td>
+                </tr>
+                <tr>
+                    <td class="label">Report Time</td>
+                    <td class="value">{timestamp}</td>
+                </tr>
+            </table>
+
+            {"<div class='notes-section'><div class='notes-label'>Picker Notes</div><div class='notes-text'>" + report_data.get('notes', '') + "</div></div>" if report_data.get('notes') else ""}
+        </div>
+
+        <div class="footer">
+            <p>This report was generated automatically by the TWG Warehouse Scanner App.<br>
+            Please investigate the reported bin at your earliest convenience.</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+            # Build the email
+            msg = MIMEMultipart('alternative')
+            msg['Subject'] = subject
+            msg['From'] = smtp_user
+            msg['To'] = ic_email
+            msg['Reply-To'] = smtp_user
+
+            # Plain text fallback
+            plain_text = (
+                f"BIN INSPECTION REPORT\n"
+                f"{'=' * 40}\n\n"
+                f"Reason:       {report_data.get('reason', 'Issue Reported')}\n"
+                f"Bin:          {report_data.get('bin', 'N/A')}\n"
+                f"Item:         {report_data.get('item', 'N/A')}\n"
+                f"On-Hand:      {report_data.get('onhand', 'N/A')}\n"
+                f"Allocated:    {report_data.get('alloc', 'N/A')}\n"
+                f"Available:    {report_data.get('avail', 'N/A')}\n"
+                f"Warehouse:    {report_data.get('location', 'N/A')}\n"
+                f"Sales Order:  {report_data.get('so', 'N/A')}\n"
+                f"Reported By:  {report_data.get('picker', 'N/A')}\n"
+                f"Report Time:  {timestamp}\n"
+            )
+            if report_data.get('notes'):
+                plain_text += f"\nPicker Notes:\n{report_data.get('notes')}\n"
+
+            plain_text += (
+                f"\n{'=' * 40}\n"
+                f"Auto-generated by TWG Warehouse Scanner App.\n"
+                f"Please investigate the reported bin at your earliest convenience.\n"
+            )
+
+            msg.attach(MIMEText(plain_text, 'plain'))
+            msg.attach(MIMEText(html_body, 'html'))
+
+            # Send via Office 365 SMTP
+            with smtplib.SMTP(smtp_server, smtp_port) as server:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                server.login(smtp_user, smtp_password)
+                server.sendmail(smtp_user, [ic_email], msg.as_string())
+
+            logging.info(f"BIN REPORT EMAIL SENT: Bin={report_data.get('bin')}, Item={report_data.get('item')}, Reason={report_data.get('reason')}, Picker={report_data.get('picker')}")
+
+        except Exception as e:
+            logging.error(f"BIN REPORT EMAIL FAILED: {e}")
+
+    # Fire and forget — run in background thread
+    thread = threading.Thread(target=_send, daemon=True)
+    thread.start()
 
 
 # --- ROUTES ---
@@ -363,6 +539,60 @@ def validate_bin():
     finally:
         if conn: conn.close()
 
+@app.route('/report_bin', methods=['POST'])
+def report_bin():
+    """
+    Receives a bin issue report from the picker and sends an email
+    to the IC team in the background. Returns immediately so the
+    picker can continue working without interruption.
+    """
+    if 'user_id' not in session:
+        return jsonify({'status': 'error', 'msg': 'Session expired. Please log in again.'})
+
+    data = request.json
+    bin_val = data.get('bin', '').strip()
+    item_code = data.get('item', '').strip()
+    reason = data.get('reason', '').strip()
+    notes = data.get('notes', '').strip()
+    onhand = data.get('onhand', 'N/A')
+    alloc = data.get('alloc', 'N/A')
+    avail = data.get('avail', 'N/A')
+    so_num = data.get('so', '').strip()
+
+    if not bin_val or not reason:
+        return jsonify({'status': 'error', 'msg': 'Bin and reason are required.'})
+
+    # Sanitize notes — max 500 chars to prevent abuse
+    if len(notes) > 500:
+        notes = notes[:500]
+
+    report_data = {
+        'bin': bin_val,
+        'item': item_code,
+        'reason': reason,
+        'notes': notes,
+        'onhand': onhand,
+        'alloc': alloc,
+        'avail': avail,
+        'so': so_num,
+        'picker': session.get('user_id', 'Unknown'),
+        'location': session.get('location', 'Unknown'),
+        'timestamp': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    }
+
+    logging.info(
+        f"BIN REPORT RECEIVED: Bin={bin_val}, Item={item_code}, "
+        f"Reason={reason}, Picker={session.get('user_id')}, SO={so_num}"
+    )
+
+    # Fire email in background — picker gets instant response
+    send_bin_report_email(report_data)
+
+    return jsonify({
+        'status': 'success',
+        'msg': f"Report submitted for bin {bin_val}. IC team has been notified."
+    })
+
 @app.route('/process_batch_scan', methods=['POST'])
 def process_batch_scan():
     """
@@ -536,7 +766,7 @@ def process_batch_scan():
                 )
 
         # ===================================================================
-        # PART 3: Audit Log (ScanBinTran2) — with exception codes
+        # PART 3: Audit Log Insert (ScanBinTran2) — with exception codes
         # Zero-qty picks ARE included here — this is their only DB write.
         # ===================================================================
         for pick in picks:

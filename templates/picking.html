@@ -227,6 +227,22 @@
         </div>
     </div>
 
+    <!-- BIN REPORT MODAL — for reporting bin issues to IC team via email -->
+    <div id="binReportModal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span style="color:#dd6b20; font-weight:800;">🚩 Report Bin to IC</span>
+                <span onclick="closeModal('binReportModal')" style="font-size:20px; cursor:pointer;">&times;</span>
+            </div>
+            <div class="modal-body" id="binReportBody">
+                <!-- Populated dynamically by openBinReportModal() -->
+            </div>
+            <div class="modal-footer" style="text-align: center;">
+                <button id="btnSubmitBinReport" onclick="submitBinReport()" class="btn-small-action" style="background:#dd6b20; padding:10px 24px; height:auto; font-size:14px; width: 100%;">Submit Report to IC</button>
+            </div>
+        </div>
+    </div>
+
     <div id="debugConsole"></div>
 
     <script>
