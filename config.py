@@ -6,6 +6,11 @@ load_dotenv()
 class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev_key_very_secret_999'
     
+    # --- APP VERSION (used as cache-buster for static assets) ---
+    # Bump this on every deploy to force Cloudflare and browsers
+    # to fetch fresh JS/CSS instead of serving stale cached copies.
+    APP_VERSION = '1.8.0'
+
     # --- DATABASE CONFIG ---
     DB_DRIVER = os.environ.get('DB_DRIVER', '{ODBC Driver 17 for SQL Server}')
     DB_SERVER = os.environ.get('DB_SERVER')

@@ -6,13 +6,13 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#1a202c">
-    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
-    <link rel="apple-touch-icon" sizes="192x192" href="{{ url_for('static', filename='logo/twg-192.png') }}">
-    <link rel="apple-touch-icon" sizes="512x512" href="{{ url_for('static', filename='logo/twg-512.png') }}">
-    <link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='logo/twg-192.png') }}">
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}?v={{ config.APP_VERSION }}">
+    <link rel="apple-touch-icon" sizes="192x192" href="{{ url_for('static', filename='logo/twg-192.png') }}?v={{ config.APP_VERSION }}">
+    <link rel="apple-touch-icon" sizes="512x512" href="{{ url_for('static', filename='logo/twg-512.png') }}?v={{ config.APP_VERSION }}">
+    <link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='logo/twg-192.png') }}?v={{ config.APP_VERSION }}">
     
     <title>TWG Warehouse</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ config.APP_VERSION }}">
     
     <style>
         body {
@@ -154,7 +154,7 @@
 
     <div class="login-card">
         <div class="login-brand">
-            <img src="{{ url_for('static', filename='logo/twg.png') }}" alt="TWG">
+            <img src="{{ url_for('static', filename='logo/twg.png') }}?v={{ config.APP_VERSION }}" alt="TWG">
             <p class="login-brand-title">Warehouse Management</p>
         </div>
 
@@ -194,10 +194,10 @@
         </div>
     </div>
 
-    <div class="version-tag">v1.7</div>
+    <div class="version-tag">v{{ config.APP_VERSION }}</div>
 
     <!-- Fullscreen management is handled by utils.js -->
-    <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/utils.js') }}?v={{ config.APP_VERSION }}"></script>
     
     <script>
         // =============================================================

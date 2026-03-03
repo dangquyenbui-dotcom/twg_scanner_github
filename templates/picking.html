@@ -6,13 +6,13 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#1a202c">
-    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
-    <link rel="apple-touch-icon" sizes="192x192" href="{{ url_for('static', filename='logo/twg-192.png') }}">
-    <link rel="apple-touch-icon" sizes="512x512" href="{{ url_for('static', filename='logo/twg-512.png') }}">
-    <link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='logo/twg-192.png') }}">
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}?v={{ config.APP_VERSION }}">
+    <link rel="apple-touch-icon" sizes="192x192" href="{{ url_for('static', filename='logo/twg-192.png') }}?v={{ config.APP_VERSION }}">
+    <link rel="apple-touch-icon" sizes="512x512" href="{{ url_for('static', filename='logo/twg-512.png') }}?v={{ config.APP_VERSION }}">
+    <link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='logo/twg-192.png') }}?v={{ config.APP_VERSION }}">
     <title>Picking - {{ so }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/picking.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ config.APP_VERSION }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/picking.css') }}?v={{ config.APP_VERSION }}">
 </head>
 <body>
     
@@ -25,7 +25,7 @@
     {% if not so %}
     <div class="tc52-layout" style="justify-content: flex-start; align-items: center; background: #f4f6f9; padding-top: 30px;">
         <div style="width: 100%; max-width: 320px; padding: 20px; text-align: center;">
-            <img src="{{ url_for('static', filename='logo/twg.png') }}" alt="TWG" style="height: 44px; margin-bottom: 14px;">
+            <img src="{{ url_for('static', filename='logo/twg.png') }}?v={{ config.APP_VERSION }}" alt="TWG" style="height: 44px; margin-bottom: 14px;">
             <h2 style="color: #1a202c; margin: 0 0 6px 0; font-size: 18px; font-weight: 800; letter-spacing: 0.5px;">SALES ORDER PICK</h2>
             <p style="color: #718096; font-size: 12px; margin: 0 0 20px 0;">Scan or enter a Sales Order number</p>
             
@@ -68,7 +68,7 @@
         <div class="tc52-header" style="background: #1a202c; border-bottom: none;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <img src="{{ url_for('static', filename='logo/twg.png') }}" alt="TWG" style="height: 24px;">
+                    <img src="{{ url_for('static', filename='logo/twg.png') }}?v={{ config.APP_VERSION }}" alt="TWG" style="height: 24px;">
                     <span style="font-weight: 700; color: #a0aec0; font-size: 11px; letter-spacing: 0.5px;">SALES ORDER PICK</span>
                 </div>
                 <span style="font-size:11px; color:#a0aec0; font-weight: 600;">{{ session['user_id'] }} <span style="color:#718096;">({{ session['location'] }})</span></span>
@@ -251,9 +251,9 @@
         };
     </script>
     
-    <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/picking-ui.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/picking.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/utils.js') }}?v={{ config.APP_VERSION }}"></script>
+    <script src="{{ url_for('static', filename='js/picking-ui.js') }}?v={{ config.APP_VERSION }}"></script>
+    <script src="{{ url_for('static', filename='js/picking.js') }}?v={{ config.APP_VERSION }}"></script>
 
     <!-- KEYBOARD-AWARE VIEWPORT HANDLER -->
     <script>
