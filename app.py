@@ -124,11 +124,14 @@ def send_bin_report_email(report_data):
             smtp_port = app.config['SMTP_PORT']
             smtp_user = app.config['SMTP_USER']
             smtp_password = app.config['SMTP_PASSWORD']
-            ic_email = app.config['IC_EMAIL']
+            ic_email_raw = app.config['IC_EMAIL']
 
-            if not smtp_user or not ic_email:
+            if not smtp_user or not ic_email_raw:
                 logging.error("BIN REPORT EMAIL: SMTP_USER or IC_EMAIL not configured.")
                 return
+
+            # Support comma-separated recipients (e.g. "a@co.com,b@co.com")
+            ic_recipients = [e.strip() for e in ic_email_raw.split(',') if e.strip()]
 
             # Build subject line
             subject = (
@@ -232,7 +235,7 @@ def send_bin_report_email(report_data):
             msg = MIMEMultipart('alternative')
             msg['Subject'] = subject
             msg['From'] = smtp_user
-            msg['To'] = ic_email
+            msg['To'] = ', '.join(ic_recipients)
             msg['Reply-To'] = smtp_user
 
             # Plain text fallback
@@ -268,7 +271,7 @@ def send_bin_report_email(report_data):
                 server.starttls()
                 server.ehlo()
                 server.login(smtp_user, smtp_password)
-                server.sendmail(smtp_user, [ic_email], msg.as_string())
+                server.sendmail(smtp_user, ic_recipients, msg.as_string())
 
             logging.info(f"BIN REPORT EMAIL SENT: Bin={report_data.get('bin')}, Item={report_data.get('item')}, Reason={report_data.get('reason')}, Picker={report_data.get('picker')}")
 
