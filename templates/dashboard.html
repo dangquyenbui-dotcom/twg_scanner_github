@@ -15,13 +15,24 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     
     <style>
-        /* DASHBOARD SPECIFIC STYLES */
-        body {
-            background-color: #f4f6f9;
+        /* ==========================================================
+           DASHBOARD LAYOUT
+           Uses a position:fixed full-viewport container — same 
+           approach as the picking page's .tc52-layout — so it is 
+           immune to the global body overflow:hidden from style.css.
+           This is why the picking page never clips but dashboard did.
+           ========================================================== */
+
+        .dash-layout {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
             display: flex;
             flex-direction: column;
-            height: 100vh;
-            height: 100dvh;
+            background: #f4f6f9;
+            z-index: 1;
         }
 
         /* 1. TOP NAVIGATION */
@@ -59,14 +70,16 @@
             letter-spacing: 0.5px;
         }
 
-        /* 2. MAIN CONTENT AREA */
+        /* 2. MAIN CONTENT AREA — scrollable middle, fills remaining space */
         .main-content {
-            flex: 1;
+            flex: 1 1 0;            /* grow to fill, shrink allowed, basis 0 */
+            min-height: 0;          /* allow shrink below content size */
             padding: 16px;
             display: flex;
             flex-direction: column;
             gap: 16px;
             overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
         }
 
         /* 3. HERO WIDGET (Clock) */
@@ -181,10 +194,11 @@
             color: #9ca3af;
         }
 
-        /* 5. FOOTER */
+        /* 5. FOOTER — pinned at bottom, never shrinks or gets clipped */
         .footer-bar {
             text-align: center;
             padding: 20px 16px;
+            padding-bottom: max(20px, env(safe-area-inset-bottom));
             flex: 0 0 auto;
             background: #fff;
             border-top: 1px solid #e8ecf1;
@@ -234,56 +248,60 @@
 </head>
 <body>
 
-    <div class="nav-bar">
-        <img src="{{ url_for('static', filename='logo/twg.png') }}" alt="TWG" class="brand-logo">
-        <div class="user-info">
-            <span class="user-id">{{ session['user_id'] }}</span>
-            <span class="user-loc">📍 {{ session['location'] }}</span>
-        </div>
-    </div>
+    <div class="dash-layout">
 
-    <div class="main-content">
-        
-        <div class="hero-card">
-            <span id="timeDisplay" class="clock-time">00:00:00</span>
-            <span id="dateDisplay" class="clock-date">Loading...</span>
-        </div>
-
-        <div>
-            <div class="app-section-title">Warehouse Operations</div>
-            <div class="app-grid">
-                
-                <a href="/picking" class="app-card active-card">
-                    <span class="app-icon">📦</span>
-                    <span class="app-title">Order Pick</span>
-                </a>
-
-                <div class="app-card disabled">
-                    <span class="app-icon">📊</span>
-                    <span class="app-title">Cycle Count</span>
-                </div>
-
-                <div class="app-card disabled">
-                    <span class="app-icon">🚚</span>
-                    <span class="app-title">Receiving</span>
-                </div>
-
-                <div class="app-card disabled">
-                    <span class="app-icon">🏷️</span>
-                    <span class="app-title">Label Print</span>
-                </div>
-
+        <div class="nav-bar">
+            <img src="{{ url_for('static', filename='logo/twg.png') }}" alt="TWG" class="brand-logo">
+            <div class="user-info">
+                <span class="user-id">{{ session['user_id'] }}</span>
+                <span class="user-loc">📍 {{ session['location'] }}</span>
             </div>
         </div>
 
-    </div>
+        <div class="main-content">
+            
+            <div class="hero-card">
+                <span id="timeDisplay" class="clock-time">00:00:00</span>
+                <span id="dateDisplay" class="clock-date">Loading...</span>
+            </div>
 
-    <div class="footer-bar">
-        <div style="display: flex; gap: 12px; justify-content: center;">
-            <a href="/logout" class="btn-footer-action">Sign Out</a>
-            <button id="fs-toggle-btn" class="btn-footer-action btn-fs">⛶ Fullscreen</button>
+            <div>
+                <div class="app-section-title">Warehouse Operations</div>
+                <div class="app-grid">
+                    
+                    <a href="/picking" class="app-card active-card">
+                        <span class="app-icon">📦</span>
+                        <span class="app-title">Order Pick</span>
+                    </a>
+
+                    <div class="app-card disabled">
+                        <span class="app-icon">📊</span>
+                        <span class="app-title">Cycle Count</span>
+                    </div>
+
+                    <div class="app-card disabled">
+                        <span class="app-icon">🚚</span>
+                        <span class="app-title">Receiving</span>
+                    </div>
+
+                    <div class="app-card disabled">
+                        <span class="app-icon">🏷️</span>
+                        <span class="app-title">Label Print</span>
+                    </div>
+
+                </div>
+            </div>
+
         </div>
-        <div class="version-text">v1.7 • Connected</div>
+
+        <div class="footer-bar">
+            <div style="display: flex; gap: 12px; justify-content: center;">
+                <a href="/logout" class="btn-footer-action">Sign Out</a>
+                <button id="fs-toggle-btn" class="btn-footer-action btn-fs">⛶ Fullscreen</button>
+            </div>
+            <div class="version-text">v1.7 • Connected</div>
+        </div>
+
     </div>
 
     <!-- Fullscreen management is handled by utils.js -->
