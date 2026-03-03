@@ -2,7 +2,8 @@
 
 ## Project Status
 
-**Phase:** 3 — Batch Scanning with Hardened Commit Logic + Short-Pick Exception Workflow + Zero Pick Workflow
+**Version:** 1.8.0
+**Phase:** 4 — Batch Scanning with Hardened Commit Logic + Short-Pick Exception Workflow + Zero Pick Workflow + IC Bin Reporting
 **Current Mode:** LIVE COMMIT MODE — The application validates all logic (inventory availability, order limits, location checks) and performs live SQL `UPDATE` and `INSERT` operations against the database. All writes are wrapped in a single transaction with automatic rollback on any failure. Post-commit verification detects concurrent modifications and logs warnings without rollback.
 
 ---
@@ -12,17 +13,20 @@
 - **Backend:** Python 3 (Flask)
 - **Database:** Microsoft SQL Server (via `pyodbc`)
 - **Frontend:** HTML5, CSS3, Vanilla JavaScript (ES6)
+- **Email:** Office 365 SMTP (via Python `smtplib`, background thread delivery)
 - **Target Device:** Zebra TC52 (Mobile Viewport, Portrait Orientation)
 - **PWA Support:** Web App Manifest with fullscreen display mode
+- **Proxy/CDN:** Cloudflare (via `dev.thewheelgroup.info`)
 
 ---
 
 ## Project Structure
 
 ```
-├── app.py                  # Flask application — all routes and business logic
-├── config.py               # Environment variable loader and app configuration
+├── app.py                  # Flask application — all routes, business logic, and email sender
+├── config.py               # Environment variable loader, app version, and configuration
 ├── requirements.txt        # Python dependencies (flask, pyodbc, python-dotenv)
+├── .env                    # Environment variables (DB credentials, SMTP credentials, IC email)
 ├── static/
 │   ├── css/
 │   │   ├── style.css       # Global styles, layout system, table, modal, buttons
@@ -30,14 +34,14 @@
 │   ├── js/
 │   │   ├── utils.js        # Shared utilities: UUID, audio, fullscreen, logging
 │   │   ├── picking.js      # Core picking logic: state, scanning, validation, submission
-│   │   └── picking-ui.js   # UI rendering: toasts, modals, bin list, review list, custom dialogs
+│   │   └── picking-ui.js   # UI rendering: toasts, modals, bin list, review list, custom dialogs, bin report
 │   ├── logo/
 │   │   └── twg.png         # TWG brand logo used across all pages
 │   └── manifest.json       # PWA manifest for home screen install
 ├── templates/
 │   ├── login.html          # User authentication screen
 │   ├── dashboard.html      # Main menu with clock and app grid
-│   └── picking.html        # Order picking interface (SO entry + pick screen)
+│   └── picking.html        # Order picking interface (SO entry + pick screen + all modals)
 └── readme.md               # This file
 ```
 
@@ -49,20 +53,58 @@
 
 ```ini
 SECRET_KEY=your_flask_secret_key
-DB_DRIVER={ODBC Driver 17 for SQL Server}
+DB_DRIVER={ODBC Driver 18 for SQL Server};TrustServerCertificate=yes
 DB_SERVER=YOUR_SERVER_IP
 DB_UID=YOUR_USER
 DB_PWD=YOUR_PASSWORD
 DB_AUTH=PRO12       # Database for Inventory, Users, Audit (ScanOnhand2, ScanUsers, ScanBinTran2, ScanItem)
 DB_ORDERS=PRO05     # Database for Sales Orders (SOTRAN, SOMAST)
+
+# Email Configuration (Office 365 SMTP for Bin Reports to IC Team)
+SMTP_SERVER=smtp.office365.com
+SMTP_PORT=587
+SMTP_USER=no_reply@thewheelgroup.com
+SMTP_PASSWORD=YOUR_SMTP_PASSWORD
+IC_EMAIL=recipient1@thewheelgroup.com,recipient2@thewheelgroup.com
 ```
+
+The `IC_EMAIL` field supports **comma-separated multiple recipients**. All listed email addresses receive the bin report when a picker flags a bin for investigation.
 
 ### Config Class (`config.py`)
 
-The `Config` class loads all values from environment variables with fallback defaults. Two database references are maintained separately:
+The `Config` class loads all values from environment variables with fallback defaults. Key configuration groups:
 
-- `DB_AUTH` — Used for inventory tables (`ScanOnhand2`), user authentication (`ScanUsers`), UPC mapping (`ScanItem`), and audit logging (`ScanBinTran2`).
-- `DB_ORDERS` — Used for the sales order tables (`SOTRAN`, `SOMAST`).
+- **`APP_VERSION`** — Centralized version string used as a cache-buster query parameter on all static assets (`?v=1.8.0`). Bump this value on every deploy to force Cloudflare and browser caches to fetch fresh JS, CSS, images, and the PWA manifest. All three templates (`login.html`, `dashboard.html`, `picking.html`) read this value via `{{ config.APP_VERSION }}`.
+
+- **`DB_AUTH`** — Used for inventory tables (`ScanOnhand2`), user authentication (`ScanUsers`), UPC mapping (`ScanItem`), and audit logging (`ScanBinTran2`).
+
+- **`DB_ORDERS`** — Used for the sales order tables (`SOTRAN`, `SOMAST`).
+
+- **`SMTP_*` / `IC_EMAIL`** — Office 365 SMTP connection settings and recipient list for the IC Bin Report email feature.
+
+- **`SIMULATION_MODE`** — Reserved flag. Set to `False` for live database writes (current default). Set to `True` to validate logic without committing changes (not currently enforced in routes — reserved for future use).
+
+---
+
+## Cache-Busting Strategy
+
+All static asset references in templates use a version query parameter sourced from `Config.APP_VERSION`:
+
+```html
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ config.APP_VERSION }}">
+<script src="{{ url_for('static', filename='js/picking.js') }}?v={{ config.APP_VERSION }}"></script>
+```
+
+This covers CSS files, JavaScript files, logo images, PWA icon images, and the manifest.json file. When `APP_VERSION` is bumped (e.g., from `1.8.0` to `1.8.1`), every asset URL changes, forcing both Cloudflare edge caches and browser/PWA caches to fetch fresh copies.
+
+**Deployment workflow:**
+
+1. Make code changes.
+2. Bump `APP_VERSION` in `config.py`.
+3. Deploy to server.
+4. (Optional) Purge Cloudflare cache once — after that, the version string handles cache invalidation automatically.
+
+The login page footer and dashboard footer version labels also read from `APP_VERSION` dynamically, so the displayed version always matches the deployed code.
 
 ---
 
@@ -254,6 +296,53 @@ Verifies that a specific item exists in a scanned bin with available stock.
 
 **Response (success):** `{ "status": "success", "onhand": 10 }`
 **Response (failure):** `{ "status": "error", "msg": "Bin 'XXX' Empty/Mismatch" }`
+
+### `POST /report_bin`
+
+Receives a bin issue report from the picker and sends an email to the IC (Inventory Control) team in the background. Returns immediately so the picker can continue working without interruption.
+
+**Request body:**
+```json
+{
+  "bin": "000-10-01-02-03",
+  "item": "ITEM-ABC",
+  "reason": "Qty Mismatch",
+  "notes": "System says 10 but only 6 on shelf",
+  "onhand": 10,
+  "alloc": 2,
+  "avail": 8,
+  "so": "1234567"
+}
+```
+
+**Process:**
+1. Validates session — returns error if expired.
+2. Validates that `bin` and `reason` are present.
+3. Truncates `notes` to 500 characters maximum (abuse prevention).
+4. Assembles report data including picker ID, warehouse location, and server timestamp from the session.
+5. Logs the report at `INFO` level.
+6. Spawns a background thread (`threading.Thread`, daemon mode) to send the email via Office 365 SMTP. The picker's HTTP request returns immediately — it does not wait for SMTP delivery.
+7. Returns success response.
+
+**Email details:**
+- **Subject:** `[IC Action Required] Bin Report — {bin} | {reason} | Item {item}`
+- **Format:** HTML email with plain-text fallback. The HTML version uses TWG branding, a color-coded alert banner, and a structured detail grid showing all bin metrics, the sales order context, picker identity, and timestamp.
+- **Recipients:** All comma-separated addresses in the `IC_EMAIL` environment variable.
+- **Sender:** The `SMTP_USER` address (Office 365 authenticated).
+- **SMTP connection:** TLS via `smtp.office365.com:587` with `STARTTLS`.
+- **Error handling:** SMTP failures are caught and logged at `ERROR` level. They do not affect the picker's response — the picker always gets a success toast. Failed emails appear only in server logs.
+
+**Available issue types (picker selects one):**
+- `Qty Mismatch` — System quantity does not match physical count
+- `Label Issue` — Wrong, missing, or damaged bin/item label
+- `Damaged Product` — Product found but damaged
+- `Wrong Item in Bin` — Bin contains a different item than expected
+- `Bin Disorganized` — Mixed SKUs or messy bin
+- `Safety Hazard` — Safety concern in or around the bin
+- `Other` — Free-text description in notes field
+
+**Response (success):** `{ "status": "success", "msg": "Report submitted for bin 000-10-01-02-03. IC team has been notified." }`
+**Response (error):** `{ "status": "error", "msg": "Bin and reason are required." }`
 
 ### `POST /process_batch_scan`
 
@@ -555,6 +644,40 @@ When the picker taps Submit, zero-pick entries are handled seamlessly:
 - If the batch has both zero picks and short picks from other lines, both sets of exceptions are merged into a single `exceptions` dict before submission.
 - On the server, zero-qty picks skip inventory updates (`ScanOnhand2`) and sales order updates (`SOTRAN`) but still write an audit row to `ScanBinTran2` with `quantity=0` and the exception code in `scanresult`.
 
+### IC Bin Report Workflow
+
+The IC (Inventory Control) Bin Report workflow allows pickers to flag any bin for investigation by the IC team without interrupting their picking flow. Reports are sent via email in the background.
+
+**Picker flow:**
+
+1. Select an order line (to establish which item they're looking at).
+2. Tap the **"🔍 Bins"** button to open the Available Bins modal.
+3. Each bin row in the modal has a **🚩** (flag) button in the rightmost "IC" column.
+4. Tap the flag on the bin they want to report.
+5. The **Bin Report Modal** opens, pre-filled with bin location, item code, on-hand, allocated, and available quantities.
+6. The picker **must** select an issue type from the dropdown:
+   - `Qty Mismatch` — System quantity does not match physical count
+   - `Label Issue` — Wrong, missing, or damaged bin/item label
+   - `Damaged Product` — Product found but damaged
+   - `Wrong Item in Bin` — Bin contains a different item than expected
+   - `Bin Disorganized` — Mixed SKUs or messy bin
+   - `Safety Hazard` — Safety concern in or around the bin
+   - `Other` — Free-text description in notes field
+7. Optionally add notes (up to 500 characters) describing the issue.
+8. Tap **"Submit Report to IC"**.
+9. The modal closes, a green success toast confirms the report, and the picker can immediately continue picking.
+
+**Behind the scenes:**
+
+- The client sends a `POST` to `/report_bin` with the bin details, selected reason, notes, and the current SO number.
+- The server responds instantly with a success message.
+- A background daemon thread connects to Office 365 SMTP and sends a professional HTML email to all recipients listed in `IC_EMAIL`.
+- The email includes a branded header ("Bin Inspection Report — TWG Warehouse Management System"), a color-coded alert banner with the issue type, a structured detail grid with all bin metrics, the sales order reference, picker identity, warehouse location, timestamp, and any notes the picker added.
+- A plain-text fallback is included for email clients that don't render HTML.
+- SMTP failures are logged at `ERROR` level but never surface to the picker.
+
+**Non-disruptive design:** The bin report feature is entirely independent of the picking workflow. It does not modify any database tables, does not affect session picks, does not block the UI, and does not require the picker to leave their current screen. The background thread ensures SMTP latency (typically 1–3 seconds) never delays the picker's response.
+
 ### Bin Cache (`picking.js`)
 
 When a row is selected, bins are pre-fetched via `/get_item_bins` and cached in `binCache[itemCode]`. Subsequent bin validations check the cache first before making a server call. The cache is per-item and lasts for the page session.
@@ -579,7 +702,8 @@ Both functions are async/Promise-based. All calling functions (`checkExceptionsA
 
 ### Modals
 
-- **Bin Modal:** Shows all available bins for the selected item with on-hand, allocated, and available quantities. Bins are filtered client-side using `isValidBin()`. Closeable via the X button **or by tapping the dark overlay area** outside the modal. On close, focus automatically returns to the Scan Bin input via `safeFocus('binInput')`.
+- **Bin Modal:** Shows all available bins for the selected item with on-hand, allocated, available quantities, and an IC report flag (🚩) per bin row. Bins are filtered client-side using `isValidBin()`. Closeable via the X button **or by tapping the dark overlay area** outside the modal. On close, focus automatically returns to the Scan Bin input via `safeFocus('binInput')`.
+- **Bin Report Modal:** Shows pre-filled bin details with a required issue type dropdown and optional notes textarea. Opened by tapping the 🚩 flag in the Bin Modal. On submit, sends report in background and shows success toast. Closeable via X button or overlay tap.
 - **Review Modal:** Shows all current session picks with item, bin, quantity, mode badge (Auto/Manual), and a remove button per entry. Zero-pick entries are rendered with a red background, "—" for bin, "0" for quantity, and a red exception badge (e.g., `NOFND`) instead of the mode badge. Includes a "Clear All" option. Closeable via X button or overlay tap.
 - **Exception Modal:** Shows short-picked lines with required reason code dropdowns. Closeable via X button or overlay tap. Submission is blocked until all reason codes are selected.
 - **Zero Pick Modal:** Shows the selected line's item code and needed quantity with a reason code dropdown (NOFND or DMG only). Closeable via X button or overlay tap. Confirmation is blocked until a reason is selected. On confirm, adds a zero-qty entry to the session and locks the corresponding order grid row.
@@ -620,6 +744,32 @@ The application applies aggressive whitespace handling throughout:
 - **User ID:** Stripped and uppercased on login input.
 - **SO Number:** Resolved using `LIKE` match to handle leading-space padding in the database.
 - **Exception codes:** Truncated to max 10 characters before database insert to prevent column overflow.
+- **Bin report notes:** Truncated to max 500 characters before processing to prevent abuse.
+
+---
+
+## Email System Architecture
+
+The bin report email system is designed for zero-disruption to the picker workflow:
+
+```
+Picker taps 🚩 → Client POST /report_bin → Flask validates & responds 200 → Toast shown
+                                          ↓ (background)
+                                   threading.Thread(daemon=True)
+                                          ↓
+                                   smtplib.SMTP → Office 365 STARTTLS
+                                          ↓
+                                   Email delivered to IC_EMAIL recipients
+```
+
+**Key design decisions:**
+
+- **Background thread:** SMTP connections take 1–3 seconds. Running in a daemon thread means the picker's HTTP response returns in ~50ms regardless of email delivery time.
+- **Daemon mode:** The thread is marked `daemon=True` so it will not prevent the Flask process from shutting down during restarts.
+- **No retry logic:** If the SMTP connection fails (e.g., Office 365 is temporarily unreachable), the email is lost and an `ERROR` log is written. This is intentional — bin reports are informational, not transactional, and a retry queue would add complexity without proportional value.
+- **No database write:** Bin reports are not stored in the database. The email is the sole record. If persistent storage is needed in the future, a `BinReports` table could be added.
+- **HTML + plain text:** The email includes both `text/html` and `text/plain` MIME parts. Email clients that render HTML see the branded layout; plain-text clients see a structured text fallback.
+- **Multiple recipients:** The `IC_EMAIL` config value is split on commas at send time. Adding or removing recipients requires only an `.env` change — no code deployment needed.
 
 ---
 
@@ -640,6 +790,8 @@ The application applies aggressive whitespace handling throughout:
 | Zero-pick conflict guard | Normal picks exist check | Toast error if line already has qty > 0 picks (use short-pick modal instead) |
 | Zero-pick row lockout | `selectRow()` early exit | Toast error and interaction blocked on greyed-out rows |
 | Exception validation | Dropdown required for short picks | TWG-branded alert blocks submission until all reasons selected |
+| Bin report validation | Reason required, notes truncated | TWG-branded alert if no reason selected; notes capped at 500 chars |
+| Bin report email | Background thread try/catch | `logging.error()` on SMTP failure; picker always gets success response |
 
 ---
 
@@ -651,6 +803,9 @@ The application applies aggressive whitespace handling throughout:
 - Connection timeout is set to 15 seconds.
 - Passwords are stored and compared as plain text in `ScanUsers` (legacy system constraint).
 - Exception codes are truncated server-side to max 10 characters to prevent injection via oversized values.
+- Bin report notes are truncated server-side to max 500 characters to prevent abuse.
+- SMTP credentials are stored in `.env` (excluded from version control via `.gitignore`).
+- The `APP_VERSION` cache-buster is not a security feature — it exists purely for cache invalidation.
 
 ---
 
@@ -682,15 +837,17 @@ The application applies aggressive whitespace handling throughout:
 | `updateSessionDisplay(sessionPicks)` | Refreshes pick counts in the grid and pending badge |
 | `showToast(msg, type, playSound)` | Displays a timed notification banner (error: 4s, success: 2s) |
 | `isValidBin(binStr)` | Client-side bin validation (15 chars, numeric 5th character) |
-| `renderBinList(bins)` | Renders the bin modal table with stock levels |
+| `renderBinList(bins)` | Renders the bin modal table with stock levels and 🚩 IC report flags |
 | `renderReviewList(sessionPicks)` | Renders the review modal table with mode badges; zero-pick entries render with red background and exception badge |
 | `renderExceptionList(shortLines)` | Renders the exception modal with reason code dropdowns |
 | `openModal(id)` | Shows a modal overlay by ID |
 | `closeModal(id)` | Hides a modal overlay by ID; returns focus to binInput if closing bin modal |
+| `openBinReportModal(bin, onhand, alloc, avail)` | Opens the bin report modal pre-filled with bin details for IC reporting |
+| `submitBinReport()` | Validates reason selection, POSTs to `/report_bin`, shows success/error toast |
 | `twgAlert(message)` | Branded alert dialog (async, returns Promise) |
 | `twgConfirm(message)` | Branded confirm dialog (async, returns Promise resolving true/false) |
 
-**Modal close behavior:** All modals (bin, review, exception) can be closed by tapping the dark overlay area outside the modal content, in addition to the X button. The bin modal specifically returns focus to the Scan Bin input on close.
+**Modal close behavior:** All modals (bin, review, exception, zero pick, bin report) can be closed by tapping the dark overlay area outside the modal content, in addition to the X button. The bin modal specifically returns focus to the Scan Bin input on close.
 
 ### `picking.js`
 
