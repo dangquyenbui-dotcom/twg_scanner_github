@@ -44,30 +44,101 @@ function isVirtualKeyboardActive(el) {
 }
 
 /**
- * Strips leading and trailing alphabetic characters from a scanned string,
- * BUT ONLY if BOTH ends have alpha wrapping AND the remaining core is purely numeric.
- * This matches the specific DataWedge pattern where a symbology identifier
- * character is added to both ends of a numeric UPC barcode (e.g. 'A729419150129A').
+ * Strips Codabar start/stop characters and DataWedge symbology wrappers
+ * from a scanned string. Returns an array of candidate values to try
+ * matching against item codes and UPCs.
+ *
+ * CASE 1 (original): Leading+trailing alpha wrapping a purely numeric core.
+ *   Matches DataWedge symbology identifiers on UPC barcodes.
+ *   'A729419150129A' → '729419150129'
+ *
+ * CASE 2 (new): Single Codabar start/stop character (A, B, C, or D) on
+ *   each end wrapping an alphanumeric item code. These four letters are the
+ *   standard Codabar start/stop symbols that scanners may prepend/append.
+ *   'AA9101MBA' → 'A9101MB'
  *
  * Examples:
- *   'A729419150129A' → '729419150129'  (alpha on BOTH ends, core all digits → strip)
- *   'ABC12345'       → 'ABC12345'      (alpha only on left end → leave as-is)
- *   '12345ABC'       → '12345ABC'      (alpha only on right end → leave as-is)
- *   'WIDGET-X'       → 'WIDGET-X'      (not numeric core → leave as-is)
- *   'X100'           → 'X100'          (alpha only on left end → leave as-is)
- *   '729419150129'   → '729419150129'  (no wrapping chars → unchanged)
+ *   'A729419150129A' → '729419150129'  (Case 1: alpha wraps, numeric core → strip)
+ *   'AA9101MBA'      → 'A9101MB'       (Case 2: Codabar A…A wrapping → strip one each end)
+ *   'A9101MB'        → 'A9101MB'       (no change — no wrapping detected)
+ *   'ABC12345'       → 'ABC12345'      (no change — alpha only on left end)
+ *   'WIDGET-X'       → 'WIDGET-X'      (no change — not numeric core, no Codabar pattern)
+ *   '729419150129'   → '729419150129'  (no change — no wrapping chars)
+ *   'AB'             → 'AB'            (no change — too short for meaningful strip)
+ *   'X100'           → 'X100'          (no change — alpha only on left end)
  *
  * This is ONLY used for item/UPC scan comparison in handleItemScan().
  * It does NOT affect bin scanning, SO input, or any server-side data.
  */
 function stripWrappingAlpha(str) {
     if (!str) return str;
-    // Only match if string starts with letter(s), ends with letter(s), and has digits in between
+
+    var candidates = [];
+
+    // CASE 1: Full alpha wrapping around a purely numeric core
+    // e.g. 'A729419150129A' → '729419150129'
     var match = str.match(/^[A-Za-z]+(\d+)[A-Za-z]+$/);
     if (match) {
-        return match[1];
+        candidates.push(match[1]);
     }
-    return str;
+
+    // CASE 2: Single Codabar start/stop character (A, B, C, D) on each end
+    // wrapping an alphanumeric item code that contains at least one digit.
+    // e.g. 'AA9101MBA' → 'A9101MB'
+    if (str.length >= 3) {
+        var first = str.charAt(0).toUpperCase();
+        var last = str.charAt(str.length - 1).toUpperCase();
+        var codabarStopChars = 'ABCD';
+        if (codabarStopChars.indexOf(first) !== -1 && codabarStopChars.indexOf(last) !== -1) {
+            var core = str.substring(1, str.length - 1);
+            // Safety: only strip if the core contains at least one digit
+            // (prevents false positives on short plain-text like 'AB', 'CAD', 'DAD')
+            if (core.length > 0 && /\d/.test(core)) {
+                candidates.push(core);
+            }
+        }
+    }
+
+    // Return the first candidate found, or the original string if no pattern matched
+    return candidates.length > 0 ? candidates[0] : str;
+}
+
+/**
+ * Returns all plausible decoded values for a raw scan string.
+ * Used by handleItemScan() to try matching against item code and UPC
+ * without losing the original raw value.
+ *
+ * Always includes the raw value as the first element, followed by
+ * any stripped variants (deduped).
+ */
+function getScanCandidates(rawStr) {
+    if (!rawStr) return [rawStr];
+
+    var candidates = [rawStr]; // Always try raw first
+
+    // CASE 1: Full alpha wrapping around a purely numeric core
+    var match = rawStr.match(/^[A-Za-z]+(\d+)[A-Za-z]+$/);
+    if (match && match[1] !== rawStr) {
+        candidates.push(match[1]);
+    }
+
+    // CASE 2: Single Codabar start/stop character (A, B, C, D) on each end
+    if (rawStr.length >= 3) {
+        var first = rawStr.charAt(0).toUpperCase();
+        var last = rawStr.charAt(rawStr.length - 1).toUpperCase();
+        var codabarStopChars = 'ABCD';
+        if (codabarStopChars.indexOf(first) !== -1 && codabarStopChars.indexOf(last) !== -1) {
+            var core = rawStr.substring(1, rawStr.length - 1);
+            if (core.length > 0 && /\d/.test(core)) {
+                // Only add if not already in candidates
+                if (candidates.indexOf(core) === -1) {
+                    candidates.push(core);
+                }
+            }
+        }
+    }
+
+    return candidates;
 }
 
 function attachScannerListeners() {
@@ -260,21 +331,55 @@ function resetInputAfterAdd(success) {
     }
 }
 
+/**
+ * handleItemScan — Matches scanned barcode against the selected item code and UPC.
+ *
+ * MATCHING STRATEGY (v1.9.0):
+ * The raw scan value is expanded into multiple "candidates" via getScanCandidates().
+ * Each candidate is compared (case-insensitive) against:
+ *   1. The selected item code (direct match)
+ *   2. The selected UPC value (UPC match)
+ *
+ * This handles three real-world scenarios:
+ *   A) Direct scan of item code — raw value matches item code directly.
+ *   B) UPC barcode with DataWedge symbology wrapper — e.g. 'A729419150129A'
+ *      stripped to '729419150129' matches the UPC.
+ *   C) Codabar-encoded item code — e.g. 'AA9101MBA' stripped to 'A9101MB'
+ *      matches the item code after removing Codabar start/stop characters.
+ *
+ * The first matching candidate wins. If no candidate matches, it's an error.
+ */
 function handleItemScan() {
     const rawScan = document.getElementById('itemInput').value.trim();
     if(!selectedItemCode || !rawScan) return;
     
-    // Strip leading/trailing alpha characters that some scanners add (e.g. 'A729419150129A' → '729419150129')
-    // This only affects the comparison — selectedItemCode (used for submission) is untouched.
-    const scan = stripWrappingAlpha(rawScan);
-
-    const scanNorm = scan.toLowerCase();
     const itemNorm = (selectedItemCode || "").trim().toLowerCase();
     const upcNorm = selectedUpc ? selectedUpc.toLowerCase() : "";
 
-    const isDirectMatch = (scanNorm === itemNorm);
-    const isUpcMatch = (upcNorm && scanNorm === upcNorm);
-    const match = isDirectMatch || isUpcMatch;
+    // Get all plausible decoded values for this scan (raw + stripped variants)
+    var candidates = getScanCandidates(rawScan);
+    
+    var isDirectMatch = false;
+    var isUpcMatch = false;
+    var matchedCandidate = '';
+
+    // Try each candidate against item code and UPC
+    for (var ci = 0; ci < candidates.length; ci++) {
+        var candidateNorm = candidates[ci].toLowerCase();
+        
+        if (candidateNorm === itemNorm) {
+            isDirectMatch = true;
+            matchedCandidate = candidates[ci];
+            break; // Direct item match takes highest priority
+        }
+        if (upcNorm && candidateNorm === upcNorm) {
+            isUpcMatch = true;
+            matchedCandidate = candidates[ci];
+            // Don't break — keep looking for a direct match which takes priority
+        }
+    }
+
+    var match = isDirectMatch || isUpcMatch;
     
     if(!match) {
         showToast("Wrong Item/UPC!", 'error'); 
@@ -286,7 +391,7 @@ function handleItemScan() {
     
     // Show UPC translation badge if matched via UPC (not direct item code)
     if (isUpcMatch && !isDirectMatch) {
-        showUpcBadge(scan, selectedItemCode);
+        showUpcBadge(matchedCandidate, selectedItemCode);
     } else {
         hideUpcBadge();
     }
