@@ -82,7 +82,83 @@
             -webkit-overflow-scrolling: touch;
         }
 
-        /* 3. HERO WIDGET (Clock) */
+        /* 3. PENDING PICKS BANNER */
+        .pending-picks-banner {
+            background: linear-gradient(135deg, #744210 0%, #975a16 100%);
+            border-radius: 12px;
+            padding: 14px 16px;
+            box-shadow: 0 4px 12px rgba(116, 66, 16, 0.25);
+            flex: 0 0 auto;
+            animation: bannerPulse 2s ease-in-out 1;
+        }
+        @keyframes bannerPulse {
+            0% { transform: scale(1); }
+            15% { transform: scale(1.02); }
+            30% { transform: scale(1); }
+        }
+        .pending-picks-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        .pending-picks-title span.icon {
+            font-size: 20px;
+        }
+        .pending-picks-title span.text {
+            font-size: 13px;
+            font-weight: 800;
+            color: #fefcbf;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .pending-so-card {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(255,255,255,0.12);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            padding: 10px 14px;
+            margin-bottom: 6px;
+            text-decoration: none;
+            transition: background 0.15s;
+        }
+        .pending-so-card:last-child {
+            margin-bottom: 0;
+        }
+        .pending-so-card:active {
+            background: rgba(255,255,255,0.22);
+        }
+        .pending-so-info {
+            display: flex;
+            flex-direction: column;
+        }
+        .pending-so-number {
+            font-size: 18px;
+            font-weight: 800;
+            color: #ffffff;
+            letter-spacing: 0.5px;
+        }
+        .pending-so-detail {
+            font-size: 11px;
+            color: #fbd38d;
+            font-weight: 600;
+            margin-top: 2px;
+        }
+        .pending-so-action {
+            background: #fefcbf;
+            color: #744210;
+            font-size: 11px;
+            font-weight: 800;
+            padding: 6px 14px;
+            border-radius: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            flex-shrink: 0;
+        }
+
+        /* 4. HERO WIDGET (Clock) */
         .hero-card {
             background: linear-gradient(135deg, #1a202c 0%, #2d3748 50%, #4a5568 100%);
             border-radius: 14px;
@@ -120,7 +196,7 @@
             letter-spacing: 1.5px;
         }
 
-        /* 4. APP GRID */
+        /* 5. APP GRID */
         .app-section-title {
             font-size: 11px;
             font-weight: 700;
@@ -194,7 +270,7 @@
             color: #9ca3af;
         }
 
-        /* 5. FOOTER — pinned at bottom, never shrinks or gets clipped */
+        /* 6. FOOTER — pinned at bottom, never shrinks or gets clipped */
         .footer-bar {
             text-align: center;
             padding: 20px 16px;
@@ -260,6 +336,9 @@
 
         <div class="main-content">
             
+            <!-- Pending Picks Banner (populated by JS if localStorage has unsubmitted picks) -->
+            <div id="pendingPicksBanner"></div>
+
             <div class="hero-card">
                 <span id="timeDisplay" class="clock-time">00:00:00</span>
                 <span id="dateDisplay" class="clock-date">Loading...</span>
@@ -337,14 +416,119 @@
         // --- CLOCK LOGIC ---
         function updateClock() {
             var now = new Date();
-            var timeString = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }); 
+            var timeString = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
             var dateString = now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
-            
+
             document.getElementById('timeDisplay').innerText = timeString;
             document.getElementById('dateDisplay').innerText = dateString;
         }
         updateClock();
         setInterval(updateClock, 1000);
+
+        // =============================================================
+        // PENDING PICKS DETECTION
+        // Scans localStorage for unsubmitted pick sessions belonging
+        // to the CURRENT user only (keys: twg_picks_<USER>_<SO>).
+        // Also migrates any old-format keys (twg_picks_<SO>) left over
+        // from before user-scoping was added.
+        // Shows a prominent resume banner on the dashboard.
+        // =============================================================
+        (function() {
+            var currentUser = "{{ session['user_id']|default('', true) }}";
+            if (!currentUser) return;
+
+            // --- MIGRATE OLD-FORMAT KEYS ---
+            // Old keys: twg_picks_<SO> (no user prefix).
+            // Pattern: starts with "twg_picks_" but does NOT contain a second "_"
+            // after the prefix, meaning there's no user segment.
+            // We migrate them to the current user's namespace.
+            var keysToScan = [];
+            for (var m = 0; m < localStorage.length; m++) {
+                keysToScan.push(localStorage.key(m));
+            }
+            for (var n = 0; n < keysToScan.length; n++) {
+                var oldKey = keysToScan[n];
+                if (!oldKey || oldKey.indexOf('twg_picks_') !== 0) continue;
+                var afterPrefix = oldKey.substring('twg_picks_'.length);
+                // New-format keys have USER_SO (contain at least one "_").
+                // Old-format keys have just SO (no "_" — SO numbers are pure digits/spaces).
+                if (afterPrefix.indexOf('_') !== -1) continue; // already user-scoped, skip
+
+                var oldSo = afterPrefix;
+                var newKey = 'twg_picks_' + currentUser + '_' + oldSo;
+                // Only migrate if new key doesn't already exist
+                if (!localStorage.getItem(newKey)) {
+                    var oldData = localStorage.getItem(oldKey);
+                    if (oldData) localStorage.setItem(newKey, oldData);
+                }
+                localStorage.removeItem(oldKey);
+
+                // Also migrate the batch ID key
+                var oldBatchKey = 'twg_batch_id_' + oldSo;
+                var newBatchKey = 'twg_batch_id_' + currentUser + '_' + oldSo;
+                if (!localStorage.getItem(newBatchKey)) {
+                    var oldBatch = localStorage.getItem(oldBatchKey);
+                    if (oldBatch) localStorage.setItem(newBatchKey, oldBatch);
+                }
+                if (localStorage.getItem(oldBatchKey)) localStorage.removeItem(oldBatchKey);
+            }
+
+            // --- SCAN FOR USER-SCOPED KEYS ---
+            var keyPrefix = 'twg_picks_' + currentUser + '_';
+            var pendingSOs = [];
+
+            for (var i = 0; i < localStorage.length; i++) {
+                var key = localStorage.key(i);
+                // Match keys like "twg_picks_QUINN_1234567"
+                if (key && key.indexOf(keyPrefix) === 0) {
+                    var soNumber = key.substring(keyPrefix.length);
+                    try {
+                        var picks = JSON.parse(localStorage.getItem(key));
+                        if (Array.isArray(picks) && picks.length > 0) {
+                            // Count total qty and number of line entries
+                            var totalQty = 0;
+                            var lineCount = picks.length;
+                            for (var j = 0; j < picks.length; j++) {
+                                totalQty += (picks[j].qty || 0);
+                            }
+                            pendingSOs.push({
+                                so: soNumber,
+                                entries: lineCount,
+                                totalQty: totalQty
+                            });
+                        }
+                    } catch (e) {
+                        // Corrupted data — skip
+                    }
+                }
+            }
+
+            if (pendingSOs.length === 0) return;
+
+            var banner = document.getElementById('pendingPicksBanner');
+            if (!banner) return;
+
+            var html = '<div class="pending-picks-banner">';
+            html += '<div class="pending-picks-title">';
+            html += '<span class="icon">⚠️</span>';
+            html += '<span class="text">Unsubmitted Picks</span>';
+            html += '</div>';
+
+            for (var k = 0; k < pendingSOs.length; k++) {
+                var p = pendingSOs[k];
+                var detail = p.entries + (p.entries === 1 ? ' scan' : ' scans') + ' · ' + p.totalQty + ' total qty';
+                html += '<a href="/picking?so=' + encodeURIComponent(p.so.trim()) + '" class="pending-so-card">';
+                html += '<div class="pending-so-info">';
+                html += '<span class="pending-so-number">SO ' + p.so.trim() + '</span>';
+                html += '<span class="pending-so-detail">' + detail + '</span>';
+                html += '</div>';
+                html += '<span class="pending-so-action">Resume ▸</span>';
+                html += '</a>';
+            }
+
+            html += '</div>';
+            banner.innerHTML = html;
+        })();
     </script>
 </body>
 </html>

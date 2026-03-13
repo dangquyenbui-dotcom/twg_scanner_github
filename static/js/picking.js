@@ -1,24 +1,63 @@
 /* picking.js - Core Logic & Controller */
 
 // --- STATE ---
-const SO_NUMBER = (typeof SERVER_DATA !== 'undefined' && SERVER_DATA.soNumber) ? SERVER_DATA.soNumber : ""; 
+const SO_NUMBER = (typeof SERVER_DATA !== 'undefined' && SERVER_DATA.soNumber) ? SERVER_DATA.soNumber : "";
+const USER_ID = (typeof SERVER_DATA !== 'undefined' && SERVER_DATA.userId) ? SERVER_DATA.userId : "";
 let sessionPicks = [];
 let binCache = {};
-let selectedItemCode = null, selectedLineNo = null, selectedUpc = null; 
-let currentBinMaxQty = 999999, currentOrderMaxQty = 999999, currentBin = ""; 
+let selectedItemCode = null, selectedLineNo = null, selectedUpc = null;
+let currentBinMaxQty = 999999, currentOrderMaxQty = 999999, currentBin = "";
 let isAutoMode = true, isSubmitting = false;
 
 // Will hold the merged picks ready for commit while the exception modal is open
 let pendingCommitPicks = [];
 
+// --- USER-SCOPED LOCALSTORAGE KEY HELPERS ---
+// Keys include the user ID so picks are private per picker on shared devices.
+// Format: twg_picks_<USER>_<SO>  and  twg_batch_id_<USER>_<SO>
+function picksKey(so) { return 'twg_picks_' + USER_ID + '_' + so; }
+function batchKey(so) { return 'twg_batch_id_' + USER_ID + '_' + so; }
+
+/**
+ * ONE-TIME MIGRATION: Moves old non-user-scoped keys (twg_picks_<SO>)
+ * to the new user-scoped format (twg_picks_<USER>_<SO>).
+ * Only runs if the old key exists AND the new key does not.
+ * After migration the old keys are removed to prevent other users
+ * from seeing them on a shared device.
+ */
+function migrateOldLocalKeys() {
+    if (!SO_NUMBER || !USER_ID) return;
+
+    var oldPicksKey = 'twg_picks_' + SO_NUMBER;
+    var oldBatchKey = 'twg_batch_id_' + SO_NUMBER;
+    var newPicksKey = picksKey(SO_NUMBER);
+    var newBatchKey = batchKey(SO_NUMBER);
+
+    // Only migrate if old key exists and new key does NOT
+    var oldData = localStorage.getItem(oldPicksKey);
+    if (oldData && !localStorage.getItem(newPicksKey)) {
+        localStorage.setItem(newPicksKey, oldData);
+        log('Migrated picks from old key to user-scoped key for SO ' + SO_NUMBER);
+    }
+    // Remove old key regardless (prevent other users from seeing it)
+    if (oldData) localStorage.removeItem(oldPicksKey);
+
+    var oldBatch = localStorage.getItem(oldBatchKey);
+    if (oldBatch && !localStorage.getItem(newBatchKey)) {
+        localStorage.setItem(newBatchKey, oldBatch);
+    }
+    if (oldBatch) localStorage.removeItem(oldBatchKey);
+}
+
 // --- INIT ---
 window.onload = function() {
     log("App Core Loaded");
-    if(SO_NUMBER) { 
-        loadFromLocal(); 
-        updateSessionDisplay(sessionPicks); 
+    if(SO_NUMBER) {
+        migrateOldLocalKeys();
+        loadFromLocal();
+        updateSessionDisplay(sessionPicks);
         refreshZeroPickRows();
-        updateMode(); 
+        updateMode();
     }
     updateStatusUI(navigator.onLine);
     
@@ -562,7 +601,7 @@ function executeSubmit(commitPicks, exceptions) {
     const originalText = btn.innerHTML; 
     btn.innerHTML = "⏳ Sending..."; btn.disabled = true;
     
-    let batchId = localStorage.getItem(`twg_batch_id_${SO_NUMBER}`);
+    let batchId = localStorage.getItem(batchKey(SO_NUMBER));
     if (!batchId) batchId = generateUUID();
 
     fetch('/process_batch_scan', {
@@ -743,21 +782,21 @@ function refreshZeroPickRows() {
 
 function saveToLocal() {
     if(!SO_NUMBER) return;
-    if (!localStorage.getItem(`twg_batch_id_${SO_NUMBER}`)) localStorage.setItem(`twg_batch_id_${SO_NUMBER}`, generateUUID());
-    localStorage.setItem(`twg_picks_${SO_NUMBER}`, JSON.stringify(sessionPicks));
+    if (!localStorage.getItem(batchKey(SO_NUMBER))) localStorage.setItem(batchKey(SO_NUMBER), generateUUID());
+    localStorage.setItem(picksKey(SO_NUMBER), JSON.stringify(sessionPicks));
 }
 
-function loadFromLocal() { 
-    const s = localStorage.getItem(`twg_picks_${SO_NUMBER}`); 
-    if(s) try { sessionPicks = JSON.parse(s); } catch(e){} 
+function loadFromLocal() {
+    const s = localStorage.getItem(picksKey(SO_NUMBER));
+    if(s) try { sessionPicks = JSON.parse(s); } catch(e){}
 }
 
-function clearLocal() { 
-    localStorage.removeItem(`twg_picks_${SO_NUMBER}`); 
-    localStorage.removeItem(`twg_batch_id_${SO_NUMBER}`); 
-    sessionPicks = []; 
-    updateSessionDisplay(sessionPicks); 
-    saveToLocal(); 
+function clearLocal() {
+    localStorage.removeItem(picksKey(SO_NUMBER));
+    localStorage.removeItem(batchKey(SO_NUMBER));
+    sessionPicks = [];
+    updateSessionDisplay(sessionPicks);
+    saveToLocal();
 }
 
 function updateMode() {

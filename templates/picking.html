@@ -247,7 +247,8 @@
 
     <script>
         var SERVER_DATA = {
-            soNumber: "{{ so|default('', true) }}"
+            soNumber: "{{ so|default('', true) }}",
+            userId: "{{ session['user_id']|default('', true) }}"
         };
     </script>
     
