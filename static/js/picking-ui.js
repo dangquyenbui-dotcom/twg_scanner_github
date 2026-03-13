@@ -25,9 +25,44 @@ function updateSessionDisplay(sessionPicks) {
     // Update Pending Count Badge
     const p = document.getElementById('pendingCount');
     if(p) {
-        p.style.display = sessionPicks.length ? 'inline-block' : 'none'; 
+        p.style.display = sessionPicks.length ? 'inline-block' : 'none';
         p.innerText = `${sessionPicks.length}`;
     }
+
+    // Update progress bar
+    updateProgressBar(sessionPicks);
+}
+
+function updateProgressBar(sessionPicks) {
+    var fill = document.getElementById('progressFill');
+    var text = document.getElementById('progressText');
+    if (!fill || !text) return;
+
+    // Compute total needed qty from the DOM (sum of all Need cells)
+    var totalNeeded = 0;
+    document.querySelectorAll('#pickingTable tbody .item-row').forEach(function(row) {
+        var needCell = row.cells[2]; // 3rd column is "Need"
+        if (needCell) totalNeeded += parseInt(needCell.innerText, 10) || 0;
+    });
+
+    // Compute total picked from sessionPicks (sum of qty)
+    var totalPicked = sessionPicks.reduce(function(sum, p) { return sum + p.qty; }, 0);
+
+    // Calculate percentage (cap at 100%)
+    var pct = totalNeeded > 0 ? Math.min(100, Math.round((totalPicked / totalNeeded) * 100)) : 0;
+
+    fill.style.width = pct + '%';
+
+    // Change bar color based on completion
+    if (pct >= 100) {
+        fill.style.background = '#38a169'; // green — complete
+    } else if (pct > 0) {
+        fill.style.background = '#3182ce'; // blue — in progress
+    } else {
+        fill.style.background = '#e2e8f0'; // grey — empty
+    }
+
+    text.innerText = totalPicked + ' of ' + totalNeeded + ' qty \u00B7 ' + pct + '%';
 }
 
 function showToast(m, t='info', playSound=true) { 

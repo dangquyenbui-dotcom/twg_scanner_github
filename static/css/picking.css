@@ -185,3 +185,8 @@
 .tc52-layout:not(.keyboard-open) .keyboard-context-bar {
     display: none;
 }
+
+/* Hide progress bar when keyboard is open to save space */
+.tc52-layout.keyboard-open #orderProgressBar {
+    display: none;
+}

@@ -437,6 +437,39 @@
             var currentUser = "{{ session['user_id']|default('', true) }}";
             if (!currentUser) return;
 
+            // --- CLEANUP SWEEP: Remove pick data older than 7 days ---
+            // Runs before pending-picks detection so stale entries don't
+            // show up in the resume banner. Only cleans current user's data.
+            (function() {
+                var STALE_DAYS = 7;
+                var now = Date.now();
+                var tsPrefix = 'twg_picks_ts_' + currentUser + '_';
+                var keysSnapshot = [];
+                for (var c = 0; c < localStorage.length; c++) {
+                    keysSnapshot.push(localStorage.key(c));
+                }
+                for (var c = 0; c < keysSnapshot.length; c++) {
+                    var k = keysSnapshot[c];
+                    if (!k || k.indexOf(tsPrefix) !== 0) continue;
+                    var so = k.substring(tsPrefix.length);
+                    var tsVal = localStorage.getItem(k);
+                    if (!tsVal) continue;
+                    try {
+                        var age = now - new Date(tsVal).getTime();
+                        if (age > STALE_DAYS * 24 * 60 * 60 * 1000) {
+                            localStorage.removeItem('twg_picks_' + currentUser + '_' + so);
+                            localStorage.removeItem('twg_batch_id_' + currentUser + '_' + so);
+                            localStorage.removeItem(k);
+                        }
+                    } catch(e) {
+                        // Invalid timestamp — remove to prevent permanent orphan
+                        localStorage.removeItem('twg_picks_' + currentUser + '_' + so);
+                        localStorage.removeItem('twg_batch_id_' + currentUser + '_' + so);
+                        localStorage.removeItem(k);
+                    }
+                }
+            })();
+
             // --- MIGRATE OLD-FORMAT KEYS ---
             // Old keys: twg_picks_<SO> (no user prefix).
             // Pattern: starts with "twg_picks_" but does NOT contain a second "_"
@@ -491,10 +524,15 @@
                             for (var j = 0; j < picks.length; j++) {
                                 totalQty += (picks[j].qty || 0);
                             }
+                            // Read the timestamp key for this SO
+                            var tsKeyName = 'twg_picks_ts_' + currentUser + '_' + soNumber;
+                            var savedTs = localStorage.getItem(tsKeyName);
+
                             pendingSOs.push({
                                 so: soNumber,
                                 entries: lineCount,
-                                totalQty: totalQty
+                                totalQty: totalQty,
+                                lastSaved: savedTs || null
                             });
                         }
                     } catch (e) {
@@ -517,6 +555,12 @@
             for (var k = 0; k < pendingSOs.length; k++) {
                 var p = pendingSOs[k];
                 var detail = p.entries + (p.entries === 1 ? ' scan' : ' scans') + ' · ' + p.totalQty + ' total qty';
+                if (p.lastSaved) {
+                    try {
+                        var d = new Date(p.lastSaved);
+                        detail += ' · Saved ' + d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ', ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+                    } catch(e) {}
+                }
                 html += '<a href="/picking?so=' + encodeURIComponent(p.so.trim()) + '" class="pending-so-card">';
                 html += '<div class="pending-so-info">';
                 html += '<span class="pending-so-number">SO ' + p.so.trim() + '</span>';

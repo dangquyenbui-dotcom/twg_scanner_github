@@ -9,7 +9,7 @@ class Config:
     # --- APP VERSION (used as cache-buster for static assets) ---
     # Bump this on every deploy to force Cloudflare and browsers
     # to fetch fresh JS/CSS instead of serving stale cached copies.
-    APP_VERSION = '1.10.0'
+    APP_VERSION = '1.11.0'
 
     # --- DATABASE CONFIG ---
     DB_DRIVER = os.environ.get('DB_DRIVER', '{ODBC Driver 17 for SQL Server}')

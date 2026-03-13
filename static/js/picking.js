@@ -17,6 +17,7 @@ let pendingCommitPicks = [];
 // Format: twg_picks_<USER>_<SO>  and  twg_batch_id_<USER>_<SO>
 function picksKey(so) { return 'twg_picks_' + USER_ID + '_' + so; }
 function batchKey(so) { return 'twg_batch_id_' + USER_ID + '_' + so; }
+function tsKey(so)    { return 'twg_picks_ts_' + USER_ID + '_' + so; }
 
 /**
  * ONE-TIME MIGRATION: Moves old non-user-scoped keys (twg_picks_<SO>)
@@ -784,6 +785,7 @@ function saveToLocal() {
     if(!SO_NUMBER) return;
     if (!localStorage.getItem(batchKey(SO_NUMBER))) localStorage.setItem(batchKey(SO_NUMBER), generateUUID());
     localStorage.setItem(picksKey(SO_NUMBER), JSON.stringify(sessionPicks));
+    localStorage.setItem(tsKey(SO_NUMBER), new Date().toISOString());
 }
 
 function loadFromLocal() {
@@ -794,10 +796,41 @@ function loadFromLocal() {
 function clearLocal() {
     localStorage.removeItem(picksKey(SO_NUMBER));
     localStorage.removeItem(batchKey(SO_NUMBER));
+    localStorage.removeItem(tsKey(SO_NUMBER));
     sessionPicks = [];
     updateSessionDisplay(sessionPicks);
-    saveToLocal();
+    // NOTE: Do NOT call saveToLocal() here. We just removed the keys
+    // intentionally; re-saving would re-create them as dead orphans.
 }
+
+/**
+ * Navigation guard — prevents accidental exit with unsubmitted picks.
+ * Called from onclick on the Exit and Change links.
+ * Returns false to cancel the default <a> navigation; if the user
+ * confirms, we navigate programmatically after the dialog resolves.
+ */
+function guardNavigation(linkEl) {
+    if (sessionPicks.length === 0) return true; // No picks — allow navigation
+
+    var dest = linkEl.href;
+    twgConfirm("You have " + sessionPicks.length + " unsubmitted pick(s).\n\nLeave without submitting?").then(function(ok) {
+        if (ok) window.location.href = dest;
+    });
+    return false; // Cancel the click event
+}
+
+/**
+ * Safety-net beforeunload guard — catches browser back, refresh, or
+ * address-bar navigation. Shows the browser's native "Leave page?" dialog.
+ * Does NOT fire on successful submit because clearLocal() sets
+ * sessionPicks = [] before location.reload().
+ */
+window.addEventListener('beforeunload', function(e) {
+    if (sessionPicks.length > 0) {
+        e.preventDefault();
+        e.returnValue = '';
+    }
+});
 
 function updateMode() {
     unlockAudio();

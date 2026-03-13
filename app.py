@@ -349,7 +349,8 @@ def picking_menu():
     
     raw_so = request.args.get('so', '')
     order_items = []
-    resolved_so = raw_so 
+    resolved_so = raw_so
+    picker_val = ''
     
     if raw_so:
         conn = get_db_connection()
@@ -445,7 +446,7 @@ def picking_menu():
         finally:
             if conn: conn.close()
             
-    return render_template('picking.html', so=resolved_so, items=order_items)
+    return render_template('picking.html', so=resolved_so, items=order_items, assigned_picker=picker_val)
 
 @app.route('/get_item_bins', methods=['POST'])
 def get_item_bins():
