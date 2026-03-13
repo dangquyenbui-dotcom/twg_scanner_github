@@ -2,8 +2,8 @@
 
 ## Project Status
 
-**Version:** 1.8.0
-**Phase:** 4 — Batch Scanning with Hardened Commit Logic + Short-Pick Exception Workflow + Zero Pick Workflow + IC Bin Reporting
+**Version:** 1.11.0
+**Phase:** 5 — Batch Scanning with Hardened Commit Logic + Short-Pick Exception Workflow + Zero Pick Workflow + IC Bin Reporting + Pending Picks Dashboard + Session Protection & Progress Tracking
 **Current Mode:** LIVE COMMIT MODE — The application validates all logic (inventory availability, order limits, location checks) and performs live SQL `UPDATE` and `INSERT` operations against the database. All writes are wrapped in a single transaction with automatic rollback on any failure. Post-commit verification detects concurrent modifications and logs warnings without rollback.
 
 ---
@@ -17,32 +17,37 @@
 - **Target Device:** Zebra TC52 (Mobile Viewport, Portrait Orientation)
 - **PWA Support:** Web App Manifest with fullscreen display mode
 - **Proxy/CDN:** Cloudflare (via `dev.thewheelgroup.info`)
+- **Client Persistence:** localStorage (user-scoped keys for multi-picker shared devices)
 
 ---
 
 ## Project Structure
 
 ```
+twg_scanner_github/
 ├── app.py                  # Flask application — all routes, business logic, and email sender
 ├── config.py               # Environment variable loader, app version, and configuration
 ├── requirements.txt        # Python dependencies (flask, pyodbc, python-dotenv)
 ├── .env                    # Environment variables (DB credentials, SMTP credentials, IC email)
+├── .gitignore              # Git exclusion rules (venv, .env, __pycache__, etc.)
 ├── static/
 │   ├── css/
-│   │   ├── style.css       # Global styles, layout system, table, modal, buttons
-│   │   └── picking.css     # Picking-specific styles, keyboard-aware layout
+│   │   ├── style.css       # Global styles, layout system, table, modal, buttons, dashboard
+│   │   └── picking.css     # Picking-specific styles, keyboard-aware layout, progress bar
 │   ├── js/
 │   │   ├── utils.js        # Shared utilities: UUID, audio, fullscreen, logging
-│   │   ├── picking.js      # Core picking logic: state, scanning, validation, submission
-│   │   └── picking-ui.js   # UI rendering: toasts, modals, bin list, review list, custom dialogs, bin report
+│   │   ├── picking.js      # Core picking logic: state, scanning, validation, submission, navigation guards
+│   │   └── picking-ui.js   # UI rendering: toasts, modals, bin list, review list, custom dialogs, bin report, progress bar
 │   ├── logo/
-│   │   └── twg.png         # TWG brand logo used across all pages
+│   │   ├── twg.png         # TWG brand logo used across all pages
+│   │   ├── twg-192.png     # PWA icon (192x192)
+│   │   └── twg-512.png     # PWA icon (512x512)
 │   └── manifest.json       # PWA manifest for home screen install
 ├── templates/
 │   ├── login.html          # User authentication screen
-│   ├── dashboard.html      # Main menu with clock and app grid
-│   └── picking.html        # Order picking interface (SO entry + pick screen + all modals)
-└── readme.md               # This file
+│   ├── dashboard.html      # Main menu with clock, app grid, pending picks detection, and localStorage cleanup
+│   └── picking.html        # Order picking interface (SO entry + pick screen + all modals + progress bar + picker warning)
+└── README.md               # This file
 ```
 
 ---
@@ -74,7 +79,7 @@ The `IC_EMAIL` field supports **comma-separated multiple recipients**. All liste
 
 The `Config` class loads all values from environment variables with fallback defaults. Key configuration groups:
 
-- **`APP_VERSION`** — Centralized version string used as a cache-buster query parameter on all static assets (`?v=1.8.0`). Bump this value on every deploy to force Cloudflare and browser caches to fetch fresh JS, CSS, images, and the PWA manifest. All three templates (`login.html`, `dashboard.html`, `picking.html`) read this value via `{{ config.APP_VERSION }}`.
+- **`APP_VERSION`** — Centralized version string used as a cache-buster query parameter on all static assets (`?v=1.11.0`). Bump this value on every deploy to force Cloudflare and browser caches to fetch fresh JS, CSS, images, and the PWA manifest. All three templates (`login.html`, `dashboard.html`, `picking.html`) read this value via `{{ config.APP_VERSION }}`.
 
 - **`DB_AUTH`** — Used for inventory tables (`ScanOnhand2`), user authentication (`ScanUsers`), UPC mapping (`ScanItem`), and audit logging (`ScanBinTran2`).
 
@@ -83,6 +88,48 @@ The `Config` class loads all values from environment variables with fallback def
 - **`SMTP_*` / `IC_EMAIL`** — Office 365 SMTP connection settings and recipient list for the IC Bin Report email feature.
 
 - **`SIMULATION_MODE`** — Reserved flag. Set to `False` for live database writes (current default). Set to `True` to validate logic without committing changes (not currently enforced in routes — reserved for future use).
+
+---
+
+## Setup & Installation
+
+### Prerequisites
+
+- Python 3.8+
+- Microsoft SQL Server (with ODBC Driver 17 or 18 installed)
+- Office 365 SMTP account (for bin report emails)
+
+### Quick Start
+
+```bash
+# 1. Clone the repository
+git clone <repo-url>
+cd twg_scanner_github
+
+# 2. Create and activate virtual environment
+python -m venv venv
+venv\Scripts\activate          # Windows
+# source venv/bin/activate     # Linux/Mac
+
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Create .env file with your credentials
+# (see Environment Variables section above)
+
+# 5. Run the application
+python app.py
+```
+
+The application starts on `http://0.0.0.0:5000` with debug mode enabled.
+
+### Dependencies (`requirements.txt`)
+
+| Package | Purpose |
+|---------|---------|
+| `flask` | Web framework, routing, session management, template rendering |
+| `pyodbc` | ODBC database driver for SQL Server connections |
+| `python-dotenv` | Loads `.env` file into `os.environ` at startup |
 
 ---
 
@@ -95,7 +142,7 @@ All static asset references in templates use a version query parameter sourced f
 <script src="{{ url_for('static', filename='js/picking.js') }}?v={{ config.APP_VERSION }}"></script>
 ```
 
-This covers CSS files, JavaScript files, logo images, PWA icon images, and the manifest.json file. When `APP_VERSION` is bumped (e.g., from `1.8.0` to `1.8.1`), every asset URL changes, forcing both Cloudflare edge caches and browser/PWA caches to fetch fresh copies.
+This covers CSS files, JavaScript files, logo images, PWA icon images, and the manifest.json file. When `APP_VERSION` is bumped (e.g., from `1.10.0` to `1.11.0`), every asset URL changes, forcing both Cloudflare edge caches and browser/PWA caches to fetch fresh copies.
 
 **Deployment workflow:**
 
@@ -214,7 +261,7 @@ The detection runs `SELECT TOP 1 *` against each table and inspects `cursor.desc
 Bin values are validated both server-side and client-side using identical rules:
 
 1. Must be exactly **15 characters** long.
-2. The **5th character** (index 4) must be **numeric** (0–9).
+2. The **5th character** (index 4) must be **numeric** (0-9).
 
 This filters out non-standard bin codes (e.g., `000-PK-0-0` for packing stations) that should not appear in pick workflows. The validation is applied in three places:
 
@@ -230,7 +277,7 @@ This filters out non-standard bin codes (e.g., `000-PK-0-0` for packing stations
 
 Returns server status and current timestamp. Used for uptime monitoring.
 
-**Response:** `{ "status": "online", "time": "2026-02-19T08:00:00" }`
+**Response:** `{ "status": "online", "time": "2026-03-13T08:00:00" }`
 
 ### `GET /`
 
@@ -251,6 +298,11 @@ Authenticates a user against the `ScanUsers` table.
 
 Renders the main menu with a live clock, user info, and app grid. Only the "Order Pick" module is currently active. Other modules (Cycle Count, Receiving, Label Print) are shown as disabled placeholders. Requires an active session.
 
+**Client-side features (v1.10.0+):**
+- **Pending Picks Detection** — Scans localStorage for unsubmitted pick sessions belonging to the current user. Displays a prominent amber resume banner with SO numbers, pick counts, and timestamps.
+- **Old-Key Migration** — Automatically migrates pre-v1.10.0 non-user-scoped localStorage keys to the new user-scoped format.
+- **Stale Data Cleanup** — Removes pick data older than 7 days to prevent localStorage bloat on shared devices.
+
 ### `GET /picking?so=<order_number>`
 
 Fetches and displays order lines for picking. This endpoint handles two states:
@@ -262,11 +314,12 @@ Fetches and displays order lines for picking. This endpoint handles two states:
 **Process:**
 1. Resolves the SO number using a `LIKE` match (handles leading spaces in the database).
 2. Validates picker assignment by checking `SOMAST.picker` is non-empty. If no picker is assigned, the order is rejected with an error message.
-3. Fetches open order lines from `SOTRAN` where `qtyord > shipqty`, `stkcode = 'Y'`, and `sostat <> 'X'` (excludes cancelled lines).
-4. Filters by user location unless the user is assigned to location `'000'` (all-access) or `'Unknown'`.
-5. Fetches UPC mappings from `ScanItem` for all unique items in the order.
-6. Strips whitespace from all item codes and UPC values during mapping.
-7. If no open lines remain, flashes a "fully picked" success message.
+3. Reads the `picker` value and passes it to the template as `assigned_picker` for the picker warning banner.
+4. Fetches open order lines from `SOTRAN` where `qtyord > shipqty`, `stkcode = 'Y'`, and `sostat <> 'X'` (excludes cancelled lines).
+5. Filters by user location unless the user is assigned to location `'000'` (all-access) or `'Unknown'`.
+6. Fetches UPC mappings from `ScanItem` for all unique items in the order.
+7. Strips whitespace from all item codes and UPC values during mapping.
+8. If no open lines remain, flashes a "fully picked" success message.
 
 ### `POST /get_item_bins`
 
@@ -493,7 +546,7 @@ If any post-commit warnings are generated, they are included in the response `wa
 
 #### Error Handling
 
-- Any exception in Phases 1–5 triggers `conn.rollback()` and returns `{ "status": "error", "msg": "..." }`.
+- Any exception in Phases 1-5 triggers `conn.rollback()` and returns `{ "status": "error", "msg": "..." }`.
 - All quantities are cast to `int()` to avoid floating-point rounding issues.
 - `ISNULL()` wrappers handle NULL allocation values in the database.
 
@@ -521,7 +574,7 @@ When the virtual keyboard opens on mobile devices, the layout dynamically resize
 
 1. Listens to `window.visualViewport.resize` events.
 2. Detects keyboard open/close by comparing viewport height to baseline (threshold: 80px reduction).
-3. When open: adds `keyboard-open` class, sets explicit layout height, hides footer buttons, shows a context bar with the currently selected item info.
+3. When open: adds `keyboard-open` class, sets explicit layout height, hides footer buttons, shows a context bar with the currently selected item info, hides the progress bar.
 4. When closed: resets layout to full screen.
 5. Recalculates baseline height on orientation changes and fullscreen state changes.
 
@@ -537,15 +590,15 @@ The application supports both hardware barcode scanners (Zebra TC52) and manual 
 - **SO Input:** Auto-submits when exactly 7 digits are detected (after trimming).
 
 **DataWedge symbology stripping (`stripWrappingAlpha()`):** Some Zebra DataWedge configurations add a symbology identifier character to both ends of a scanned UPC barcode (e.g., `A729419150129A`). The `stripWrappingAlpha()` function detects this pattern — alpha characters wrapping both ends of a purely numeric core — and strips them for comparison only. This does not affect bin scanning, SO input, or any data sent to the server. Examples:
-- `'A729419150129A'` → `'729419150129'` (stripped — alpha on both ends, numeric core)
-- `'ABC12345'` → `'ABC12345'` (unchanged — alpha only on left end)
-- `'WIDGET-X'` → `'WIDGET-X'` (unchanged — not a numeric core)
+- `'A729419150129A'` -> `'729419150129'` (stripped — alpha on both ends, numeric core)
+- `'ABC12345'` -> `'ABC12345'` (unchanged — alpha only on left end)
+- `'WIDGET-X'` -> `'WIDGET-X'` (unchanged — not a numeric core)
 
 **Input flow:**
-1. **Select Row** → User taps an order line in the grid. Controls are enabled, bin input is focused.
-2. **Scan Bin** → Validates bin against `ScanOnhand2` (uses cache if available, otherwise calls `/validate_bin`). On success, focuses item input.
-3. **Scan Item** → Compares scanned value against the selected item code and its UPC (case-insensitive, with `stripWrappingAlpha()` applied). On mismatch, shows error and clears input.
-4. **Add to Session** → In Auto mode, automatically adds quantity of 1 after successful item scan. In Manual mode, user adjusts quantity and clicks ADD.
+1. **Select Row** -> User taps an order line in the grid. Controls are enabled, bin input is focused.
+2. **Scan Bin** -> Validates bin against `ScanOnhand2` (uses cache if available, otherwise calls `/validate_bin`). On success, focuses item input.
+3. **Scan Item** -> Compares scanned value against the selected item code and its UPC (case-insensitive, with `stripWrappingAlpha()` applied). On mismatch, shows error and clears input.
+4. **Add to Session** -> In Auto mode, automatically adds quantity of 1 after successful item scan. In Manual mode, user adjusts quantity and clicks ADD.
 
 ### Pick Modes
 
@@ -554,11 +607,11 @@ The application supports both hardware barcode scanners (Zebra TC52) and manual 
 
 ### UPC Translation Badge
 
-When a scanned barcode matches a UPC (not the direct item code), a visual translation badge appears below the Scan Item input showing the UPC-to-item mapping. For example: `UPC 729419150129 → ITEM-ABC ✓`. The badge uses a slide-in animation and stays visible during repeated scans of the same UPC. It hides on row change, mismatch, or when the item code itself is scanned directly.
+When a scanned barcode matches a UPC (not the direct item code), a visual translation badge appears below the Scan Item input showing the UPC-to-item mapping. For example: `UPC 729419150129 -> ITEM-ABC`. The badge uses a slide-in animation and stays visible during repeated scans of the same UPC. It hides on row change, mismatch, or when the item code itself is scanned directly.
 
 ### Session Management (`picking.js`)
 
-Picks are stored in a local `sessionPicks` array and persisted to `localStorage` under keys prefixed with the SO number (`twg_picks_<SO>`). This survives page refreshes and accidental navigation.
+Picks are stored in a local `sessionPicks` array and persisted to `localStorage` under user-scoped keys prefixed with the user ID and SO number (`twg_picks_<USER>_<SO>`). This survives page refreshes, accidental navigation, and ensures picks are private per picker on shared devices.
 
 **Normal session pick structure:**
 ```javascript
@@ -582,7 +635,136 @@ Zero-pick entries have `qty: 0`, `bin: ""` (no bin scanned), `mode: "Zero"`, and
 - **Zero-pick duplicate guard:** A line can only have one Zero Pick entry. Attempting to zero-pick a line that already has one is blocked with a toast error.
 - **Zero-pick conflict guard:** A line that already has normal picks (qty > 0) cannot be zero-picked. The picker should use the short-pick exception modal at submit time instead.
 
-### Short-Pick Exception Workflow
+---
+
+## localStorage Key Architecture
+
+The application uses three types of localStorage keys per pick session, all scoped to the current user to prevent cross-user visibility on shared devices:
+
+| Key Pattern | Purpose | Example |
+|-------------|---------|---------|
+| `twg_picks_<USER>_<SO>` | JSON array of session picks | `twg_picks_QUINN_1234567` |
+| `twg_batch_id_<USER>_<SO>` | UUID for batch deduplication | `twg_batch_id_QUINN_1234567` |
+| `twg_picks_ts_<USER>_<SO>` | ISO 8601 timestamp of last save | `twg_picks_ts_QUINN_1234567` |
+
+**Key lifecycle:**
+1. **Created:** When the first pick is added to a session (`saveToLocal()`). The timestamp key is also written at this time.
+2. **Updated:** Every time a pick is added, removed, or modified. The timestamp updates on every save.
+3. **Removed:** On successful batch submission (`clearLocal()`). All three keys are explicitly removed.
+4. **Auto-cleaned:** The dashboard cleanup sweep removes all three keys if the timestamp is older than 7 days.
+
+**Migration support:** Pre-v1.10.0 keys used the format `twg_picks_<SO>` (no user prefix). Both `picking.js` and `dashboard.html` contain migration logic that detects old-format keys, moves their data to the current user's namespace, and removes the old keys. This is a one-time operation per key.
+
+---
+
+## Pending Picks Dashboard Notification (v1.10.0+)
+
+When a picker has unsubmitted picks in localStorage, the dashboard displays a prominent amber warning banner:
+
+**Detection flow (runs on every dashboard page load):**
+1. Reads the current user ID from the Flask session (injected via Jinja).
+2. Runs the 7-day cleanup sweep to remove stale data (see below).
+3. Migrates any old-format (non-user-scoped) keys to the current user's namespace.
+4. Scans all localStorage keys matching `twg_picks_<USER>_*`.
+5. Parses each key's JSON value and filters for non-empty arrays.
+6. Reads the corresponding timestamp key (`twg_picks_ts_<USER>_<SO>`) for display.
+7. Builds and injects a resume banner with clickable cards for each pending SO.
+
+**Banner details per SO:**
+- Sales order number
+- Number of scan entries
+- Total quantity across all picks
+- Timestamp of last save (e.g., "Saved Mar 13, 2:30 PM") — shown only if the timestamp key exists
+
+Tapping a card navigates to `/picking?so=<SO>` where the picks are automatically restored from localStorage.
+
+---
+
+## localStorage Cleanup Sweep (v1.11.0)
+
+To prevent localStorage bloat on shared devices that accumulate abandoned pick sessions, the dashboard runs an automatic cleanup sweep on every page load:
+
+**How it works:**
+1. Reads the current user ID.
+2. Takes a snapshot of all localStorage keys (to avoid index-shifting during iteration).
+3. Scans for timestamp keys matching `twg_picks_ts_<USER>_*`.
+4. For each timestamp key, parses the ISO 8601 value and computes the age.
+5. If the age exceeds **7 days**, all three keys for that SO are removed (picks, batch ID, timestamp).
+6. Invalid/unparseable timestamps are treated as stale and removed immediately.
+
+**Design decisions:**
+- Runs **before** the pending picks scan so stale entries never appear in the resume banner.
+- Uses the snapshot-then-iterate pattern to avoid index-shifting when `localStorage.removeItem()` is called during the loop.
+- Only cleans the **current user's** data — other users' keys are untouched.
+- The 7-day threshold is configurable via the `STALE_DAYS` constant.
+
+---
+
+## Order Progress Bar (v1.11.0)
+
+A thin progress bar sits between the order header and the picking grid, providing real-time visual feedback on picking completion:
+
+**Appearance:**
+- Grey background track with a colored fill bar and a text label (e.g., "12 of 25 qty - 48%").
+- Fill color: grey (0%), blue (1-99%), green (100%).
+- Smooth CSS transition on width changes (0.3s ease).
+
+**How it works:**
+1. `updateProgressBar()` is called at the end of every `updateSessionDisplay()` invocation.
+2. Reads the total needed quantity by summing the "Need" column cells from the order grid DOM.
+3. Computes total picked from the `sessionPicks` array.
+4. Calculates percentage (capped at 100%) and updates the fill width and label text.
+
+**Edge cases handled:**
+- If the progress bar DOM elements don't exist (e.g., on the SO entry page), the function is a no-op.
+- Division by zero is avoided — if `totalNeeded` is 0, percentage defaults to 0.
+- The bar is hidden via CSS when the virtual keyboard is open (`.tc52-layout.keyboard-open #orderProgressBar { display: none; }`) to maximize screen space.
+
+---
+
+## Leave-Page Confirmation Guard (v1.11.0)
+
+Prevents accidental loss of unsubmitted picks when navigating away from the picking screen:
+
+### `onclick` Guard (`guardNavigation()`)
+
+Applied to the **Exit** button and the **Change** (SO) link. When clicked:
+
+1. If `sessionPicks` is empty, allows normal navigation (returns `true`).
+2. If picks exist, cancels the default click (returns `false`), shows a TWG-branded confirm dialog: "You have X unsubmitted pick(s). Leave without submitting?"
+3. If the picker confirms, navigates programmatically via `window.location.href`.
+4. If the picker cancels, stays on the current page.
+
+### `beforeunload` Guard
+
+A safety net for browser back button, page refresh, or URL changes:
+
+1. Listens to the `window.beforeunload` event.
+2. If `sessionPicks.length > 0`, triggers the browser's native "Leave page?" dialog.
+3. Does **not** false-trigger after a successful submit because `clearLocal()` empties `sessionPicks` before `location.reload()`.
+
+---
+
+## Picker Assignment Soft-Check (v1.11.0)
+
+When loading an order that is assigned to a different picker, a dismissible amber warning banner appears:
+
+**Server-side (`app.py`):**
+- The `picker` value is read from `SOMAST` during order validation and passed to the template as `assigned_picker`.
+- The variable `picker_val` is initialized to `''` before the conditional block to ensure it's always defined, even on early-return code paths.
+
+**Template (`picking.html`):**
+- Jinja condition: `{% if assigned_picker|default('') and assigned_picker.strip().upper() != session['user_id'].strip().upper() %}`
+- Uses `|default('')` as a defensive filter in case `assigned_picker` is not passed by early-return paths in the Flask route.
+- Displays: "Assigned to **JOHN**, not you (**QUINN**)"
+- A **Continue** button dismisses the banner by setting `display: none` — it does not block picking.
+
+**Element order in the `{% else %}` block:**
+Header -> Picker Warning Banner (conditional) -> Progress Bar -> Grid -> Context Bar -> Controls
+
+---
+
+## Short-Pick Exception Workflow
 
 When the user taps **Submit**, the system checks whether any order lines were only partially picked (picked > 0 but less than the "Need" quantity). If partial picks are detected:
 
@@ -604,7 +786,7 @@ The Zero Pick workflow allows pickers to formally report that they could not fin
 **Picker flow:**
 
 1. Select the row they cannot find stock for.
-2. Tap the red **"✕ Zero Pick"** button (located next to the Bins button in the controls area).
+2. Tap the red **"X Zero Pick"** button (located next to the Bins button in the controls area).
 3. The Zero Pick modal opens, showing the line number, item code, and needed quantity.
 4. The picker **must** select one of two reason codes:
    - `NOFND` — No Find (Bin empty / Missing)
@@ -651,18 +833,11 @@ The IC (Inventory Control) Bin Report workflow allows pickers to flag any bin fo
 **Picker flow:**
 
 1. Select an order line (to establish which item they're looking at).
-2. Tap the **"🔍 Bins"** button to open the Available Bins modal.
-3. Each bin row in the modal has a **🚩** (flag) button in the rightmost "IC" column.
+2. Tap the **"Bins"** button to open the Available Bins modal.
+3. Each bin row in the modal has a flag button in the rightmost "IC" column.
 4. Tap the flag on the bin they want to report.
 5. The **Bin Report Modal** opens, pre-filled with bin location, item code, on-hand, allocated, and available quantities.
-6. The picker **must** select an issue type from the dropdown:
-   - `Qty Mismatch` — System quantity does not match physical count
-   - `Label Issue` — Wrong, missing, or damaged bin/item label
-   - `Damaged Product` — Product found but damaged
-   - `Wrong Item in Bin` — Bin contains a different item than expected
-   - `Bin Disorganized` — Mixed SKUs or messy bin
-   - `Safety Hazard` — Safety concern in or around the bin
-   - `Other` — Free-text description in notes field
+6. The picker **must** select an issue type from the dropdown (see list above).
 7. Optionally add notes (up to 500 characters) describing the issue.
 8. Tap **"Submit Report to IC"**.
 9. The modal closes, a green success toast confirms the report, and the picker can immediately continue picking.
@@ -672,11 +847,10 @@ The IC (Inventory Control) Bin Report workflow allows pickers to flag any bin fo
 - The client sends a `POST` to `/report_bin` with the bin details, selected reason, notes, and the current SO number.
 - The server responds instantly with a success message.
 - A background daemon thread connects to Office 365 SMTP and sends a professional HTML email to all recipients listed in `IC_EMAIL`.
-- The email includes a branded header ("Bin Inspection Report — TWG Warehouse Management System"), a color-coded alert banner with the issue type, a structured detail grid with all bin metrics, the sales order reference, picker identity, warehouse location, timestamp, and any notes the picker added.
 - A plain-text fallback is included for email clients that don't render HTML.
 - SMTP failures are logged at `ERROR` level but never surface to the picker.
 
-**Non-disruptive design:** The bin report feature is entirely independent of the picking workflow. It does not modify any database tables, does not affect session picks, does not block the UI, and does not require the picker to leave their current screen. The background thread ensures SMTP latency (typically 1–3 seconds) never delays the picker's response.
+**Non-disruptive design:** The bin report feature is entirely independent of the picking workflow. It does not modify any database tables, does not affect session picks, does not block the UI, and does not require the picker to leave their current screen. The background thread ensures SMTP latency (typically 1-3 seconds) never delays the picker's response.
 
 ### Bin Cache (`picking.js`)
 
@@ -689,6 +863,7 @@ When a row is selected, bins are pre-fetched via `/get_item_bins` and cached in 
 - **Toast Notifications:** Success (green, 2-second display) and error (red, 4-second display) banners appear at the top of the screen with auto-dismiss and fade-out. Audio beeps accompany toasts unless explicitly suppressed.
 - **Audio Beeps:** Success beep (1500Hz sine, 150ms) and error beep (150Hz sawtooth, 400ms) via the Web Audio API. Audio context is unlocked on the first user interaction.
 - **Pending Badge:** Status bar shows the count of unsubmitted picks.
+- **Progress Bar:** Real-time visual indicator of overall order completion (see Order Progress Bar section).
 - **Disabled Controls:** All scan inputs and buttons are greyed out and disabled until a row is selected (prevents accidental picks without a target).
 
 ### Custom Branded Dialogs (`picking-ui.js`)
@@ -698,16 +873,16 @@ All confirmation and alert dialogs use custom-branded modals instead of the brow
 - **`twgAlert(message)`** — Shows a branded dialog with an OK button. Returns a Promise that resolves when OK is tapped.
 - **`twgConfirm(message)`** — Shows a branded dialog with Cancel and OK buttons. Returns a Promise that resolves `true` (OK) or `false` (Cancel).
 
-Both functions are async/Promise-based. All calling functions (`checkExceptionsAndSubmit`, `removePick`, `clearSession`, `executeSubmit`, `confirmExceptionsAndSubmit`) use `await` or `.then()` accordingly.
+Both functions are async/Promise-based. All calling functions (`checkExceptionsAndSubmit`, `removePick`, `clearSession`, `executeSubmit`, `confirmExceptionsAndSubmit`, `guardNavigation`) use `await` or `.then()` accordingly.
 
 ### Modals
 
-- **Bin Modal:** Shows all available bins for the selected item with on-hand, allocated, available quantities, and an IC report flag (🚩) per bin row. Bins are filtered client-side using `isValidBin()`. Closeable via the X button **or by tapping the dark overlay area** outside the modal. On close, focus automatically returns to the Scan Bin input via `safeFocus('binInput')`.
-- **Bin Report Modal:** Shows pre-filled bin details with a required issue type dropdown and optional notes textarea. Opened by tapping the 🚩 flag in the Bin Modal. On submit, sends report in background and shows success toast. Closeable via X button or overlay tap.
-- **Review Modal:** Shows all current session picks with item, bin, quantity, mode badge (Auto/Manual), and a remove button per entry. Zero-pick entries are rendered with a red background, "—" for bin, "0" for quantity, and a red exception badge (e.g., `NOFND`) instead of the mode badge. Includes a "Clear All" option. Closeable via X button or overlay tap.
+- **Bin Modal:** Shows all available bins for the selected item with on-hand, allocated, available quantities, and an IC report flag per bin row. Bins are filtered client-side using `isValidBin()`. Closeable via the X button **or by tapping the dark overlay area** outside the modal. On close, focus automatically returns to the Scan Bin input via `safeFocus('binInput')`.
+- **Bin Report Modal:** Shows pre-filled bin details with a required issue type dropdown and optional notes textarea. Opened by tapping the flag in the Bin Modal. On submit, sends report in background and shows success toast. Closeable via X button or overlay tap.
+- **Review Modal:** Shows all current session picks with item, bin, quantity, mode badge (Auto/Manual), and a remove button per entry. Zero-pick entries are rendered with a red background, "---" for bin, "0" for quantity, and a red exception badge (e.g., `NOFND`) instead of the mode badge. Includes a "Clear All" option. Closeable via X button or overlay tap.
 - **Exception Modal:** Shows short-picked lines with required reason code dropdowns. Closeable via X button or overlay tap. Submission is blocked until all reason codes are selected.
 - **Zero Pick Modal:** Shows the selected line's item code and needed quantity with a reason code dropdown (NOFND or DMG only). Closeable via X button or overlay tap. Confirmation is blocked until a reason is selected. On confirm, adds a zero-qty entry to the session and locks the corresponding order grid row.
-- **Custom Dialog (twgAlert/twgConfirm):** Dynamically created branded overlay for all confirmation and alert messages. Displays "📦 TWG WMS App" header with dark theme.
+- **Custom Dialog (twgAlert/twgConfirm):** Dynamically created branded overlay for all confirmation and alert messages. Displays "TWG WMS App" header with dark theme.
 
 ### Fullscreen Management (`utils.js`)
 
@@ -753,18 +928,21 @@ The application applies aggressive whitespace handling throughout:
 The bin report email system is designed for zero-disruption to the picker workflow:
 
 ```
-Picker taps 🚩 → Client POST /report_bin → Flask validates & responds 200 → Toast shown
-                                          ↓ (background)
-                                   threading.Thread(daemon=True)
-                                          ↓
-                                   smtplib.SMTP → Office 365 STARTTLS
-                                          ↓
-                                   Email delivered to IC_EMAIL recipients
+Picker taps flag -> Client POST /report_bin -> Flask validates & responds 200 -> Toast shown
+                                             |  (background)
+                                             v
+                                      threading.Thread(daemon=True)
+                                             |
+                                             v
+                                      smtplib.SMTP -> Office 365 STARTTLS
+                                             |
+                                             v
+                                      Email delivered to IC_EMAIL recipients
 ```
 
 **Key design decisions:**
 
-- **Background thread:** SMTP connections take 1–3 seconds. Running in a daemon thread means the picker's HTTP response returns in ~50ms regardless of email delivery time.
+- **Background thread:** SMTP connections take 1-3 seconds. Running in a daemon thread means the picker's HTTP response returns in ~50ms regardless of email delivery time.
 - **Daemon mode:** The thread is marked `daemon=True` so it will not prevent the Flask process from shutting down during restarts.
 - **No retry logic:** If the SMTP connection fails (e.g., Office 365 is temporarily unreachable), the email is lost and an `ERROR` log is written. This is intentional — bin reports are informational, not transactional, and a retry queue would add complexity without proportional value.
 - **No database write:** Bin reports are not stored in the database. The email is the sole record. If persistent storage is needed in the future, a `BinReports` table could be added.
@@ -786,12 +964,14 @@ Picker taps 🚩 → Client POST /report_bin → Flask validates & responds 200 
 | Batch post-check | Try/catch, `logging.critical()` | Warnings logged and included in response, no rollback |
 | Client network | `fetch().catch()` | TWG-branded alert shown to user, submit button re-enabled |
 | Client guards | Bin limit / Order limit checks | Toast error shown, pick rejected before reaching server |
+| Navigation guard | `guardNavigation()` + `beforeunload` | Branded confirm dialog prevents accidental data loss |
 | Zero-pick duplicate guard | `isZeroPickedLine()` check | Toast error if line already has a Zero Pick entry |
 | Zero-pick conflict guard | Normal picks exist check | Toast error if line already has qty > 0 picks (use short-pick modal instead) |
 | Zero-pick row lockout | `selectRow()` early exit | Toast error and interaction blocked on greyed-out rows |
 | Exception validation | Dropdown required for short picks | TWG-branded alert blocks submission until all reasons selected |
 | Bin report validation | Reason required, notes truncated | TWG-branded alert if no reason selected; notes capped at 500 chars |
 | Bin report email | Background thread try/catch | `logging.error()` on SMTP failure; picker always gets success response |
+| Stale data cleanup | 7-day threshold on timestamp keys | Automatic removal of abandoned pick sessions on dashboard load |
 
 ---
 
@@ -806,6 +986,8 @@ Picker taps 🚩 → Client POST /report_bin → Flask validates & responds 200 
 - Bin report notes are truncated server-side to max 500 characters to prevent abuse.
 - SMTP credentials are stored in `.env` (excluded from version control via `.gitignore`).
 - The `APP_VERSION` cache-buster is not a security feature — it exists purely for cache invalidation.
+- localStorage keys are user-scoped to prevent cross-user data visibility on shared devices.
+- Navigation guards prevent accidental loss of unsubmitted work.
 
 ---
 
@@ -834,10 +1016,11 @@ Picker taps 🚩 → Client POST /report_bin → Flask validates & responds 200 
 | Function | Purpose |
 |----------|---------|
 | `updateStatusUI(online)` | Updates the status bar to show online/offline state |
-| `updateSessionDisplay(sessionPicks)` | Refreshes pick counts in the grid and pending badge |
+| `updateSessionDisplay(sessionPicks)` | Refreshes pick counts in the grid, pending badge, and progress bar |
+| `updateProgressBar(sessionPicks)` | Calculates and renders the order progress bar fill and label |
 | `showToast(msg, type, playSound)` | Displays a timed notification banner (error: 4s, success: 2s) |
 | `isValidBin(binStr)` | Client-side bin validation (15 chars, numeric 5th character) |
-| `renderBinList(bins)` | Renders the bin modal table with stock levels and 🚩 IC report flags |
+| `renderBinList(bins)` | Renders the bin modal table with stock levels and IC report flags |
 | `renderReviewList(sessionPicks)` | Renders the review modal table with mode badges; zero-pick entries render with red background and exception badge |
 | `renderExceptionList(shortLines)` | Renders the exception modal with reason code dropdowns |
 | `openModal(id)` | Shows a modal overlay by ID |
@@ -853,6 +1036,10 @@ Picker taps 🚩 → Client POST /report_bin → Flask validates & responds 200 
 
 | Function | Purpose |
 |----------|---------|
+| `picksKey(so)` | Returns the user-scoped localStorage key for picks: `twg_picks_<USER>_<SO>` |
+| `batchKey(so)` | Returns the user-scoped localStorage key for batch ID: `twg_batch_id_<USER>_<SO>` |
+| `tsKey(so)` | Returns the user-scoped localStorage key for timestamp: `twg_picks_ts_<USER>_<SO>` |
+| `migrateOldLocalKeys()` | One-time migration from old non-user-scoped keys to new format |
 | `isVirtualKeyboardActive(el)` | Detects virtual keyboard by checking `inputMode` |
 | `stripWrappingAlpha(str)` | Strips DataWedge symbology wrapping from UPC scans |
 | `attachScannerListeners()` | Binds keydown/input listeners to all scan inputs |
@@ -871,9 +1058,10 @@ Picker taps 🚩 → Client POST /report_bin → Flask validates & responds 200 
 | `confirmExceptionsAndSubmit()` | Collects exception codes from modal and proceeds to submit |
 | `executeSubmit(commitPicks, exceptions)` | Sends the final batch to `/process_batch_scan` |
 | `resetSubmitBtn(btn, txt)` | Re-enables submit button after error |
-| `saveToLocal()` | Persists session picks to localStorage |
+| `saveToLocal()` | Persists session picks and timestamp to localStorage |
 | `loadFromLocal()` | Restores session picks from localStorage |
-| `clearLocal()` | Removes all localStorage data for the current SO |
+| `clearLocal()` | Removes all localStorage data (picks, batch ID, timestamp) for the current SO |
+| `guardNavigation(linkEl)` | Intercepts link clicks, shows confirm dialog if unsaved picks exist |
 | `updateMode()` | Toggles between Auto and Manual mode UI states |
 | `openBinModal()` | Opens the bin modal and triggers bin prefetch |
 | `prefetchBins(item)` | Fetches and caches bin data from `/get_item_bins` |
@@ -889,3 +1077,53 @@ Picker taps 🚩 → Client POST /report_bin → Flask validates & responds 200 
 | `toggleKeyboard(id)` | Toggles virtual keyboard visibility on an input |
 | `safeFocus(id)` | Focuses an input with `inputMode='none'` to prevent keyboard popup |
 | `adjustQty(n)` | Increments/decrements the quantity input in Manual mode |
+
+---
+
+## Complete Picker Workflow (End-to-End)
+
+1. **Login** — Picker scans or types their user ID and password on the TC52. The app authenticates against `ScanUsers`, stores the session, and redirects to the dashboard.
+
+2. **Dashboard** — Shows the main menu with a live clock. If unsubmitted picks exist in localStorage, an amber banner appears with resume links. The cleanup sweep silently removes any pick data older than 7 days.
+
+3. **Enter SO** — Picker taps "Order Pick" and scans/types a 7-digit sales order number. The app validates the order exists and has an assigned picker.
+
+4. **Picker Warning** — If the order is assigned to a different picker, an amber warning banner appears. The picker can tap "Continue" to dismiss it and proceed.
+
+5. **Select Item** — Picker taps a row in the order grid. The row highlights yellow, controls become active, and bins are pre-fetched.
+
+6. **Scan Bin** — Picker scans a bin barcode. The app validates the bin contains the selected item with available stock.
+
+7. **Scan Item** — Picker scans the item barcode. The app matches it against the item code or UPC. A translation badge appears for UPC matches.
+
+8. **Add Pick** — In Auto mode, the pick is added automatically (qty 1). In Manual mode, the picker adjusts quantity and taps ADD. The progress bar updates in real-time.
+
+9. **Repeat** — Steps 5-8 repeat for each item/bin combination. The session is saved to localStorage on every change.
+
+10. **Zero Pick** (optional) — For items that cannot be found, the picker taps "Zero Pick", selects a reason, and the line is locked out.
+
+11. **Report Bin** (optional) — For bins with issues, the picker opens the bins modal, taps the flag icon, fills out the report form, and an email is sent to IC.
+
+12. **Submit** — Picker taps Submit. If any lines are short-picked, the exception modal collects reason codes. A branded confirm dialog shows the pick count. On confirmation, the batch is sent to the server.
+
+13. **Server Commit** — The 6-phase transactional pipeline validates, updates inventory, updates the sales order, writes the audit log, and verifies post-commit. On success, localStorage is cleared and the page reloads.
+
+14. **Navigation Protection** — At any point, if the picker tries to exit or change orders with unsaved picks, a branded dialog warns them. The browser's native "Leave page?" dialog is also active as a safety net.
+
+---
+
+## Version History
+
+| Version | Changes |
+|---------|---------|
+| **1.11.0** | Order progress bar, leave-page confirmation guard, picker assignment soft-check, localStorage timestamp tracking, 7-day stale data cleanup sweep, `clearLocal()` orphaned keys bugfix |
+| **1.10.0** | Pending picks dashboard notification, user-scoped localStorage keys (cross-user fix), old-key migration logic, APP_VERSION cache-busting for PWA |
+| **1.8.0** | IC Bin Reporting via email, bin report modal, background SMTP threading, multi-recipient support |
+| **1.7.0** | Zero Pick workflow, row lockout system, exception code integration |
+| **1.6.0** | Short-Pick exception modal, reason code dropdowns, `scanresult` audit column |
+| **1.5.0** | Batch scanning with 6-phase transactional commit, SQL-level guards, post-commit verification |
+| **1.4.0** | UPC translation badge, DataWedge symbology stripping |
+| **1.3.0** | Custom branded dialogs (twgAlert/twgConfirm), keyboard-aware viewport |
+| **1.2.0** | Manual pick mode, quantity adjustment controls |
+| **1.1.0** | Bin validation, bin cache, bin modal with stock levels |
+| **1.0.0** | Initial release — login, dashboard, basic picking with auto mode |
