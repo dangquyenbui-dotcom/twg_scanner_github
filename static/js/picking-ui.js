@@ -336,7 +336,7 @@ function submitBinReport() {
 
     fetch('/report_bin', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: fetchHeaders(),
         body: JSON.stringify(payload)
     })
     .then(function(r) { return r.json(); })

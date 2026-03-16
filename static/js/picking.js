@@ -301,7 +301,7 @@ function validateBin() {
     if (!navigator.onLine) { showToast("Offline: Cannot verify.", 'warning'); return; }
     
     fetch('/validate_bin', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
+        method: 'POST', headers: fetchHeaders(),
         body: JSON.stringify({ bin: binVal, item: selectedItemCode })
     }).then(r=>r.json()).then(d => {
         if(d.status === 'success') { verifySuccess(d.onhand, binVal); } 
@@ -606,7 +606,7 @@ function executeSubmit(commitPicks, exceptions) {
     if (!batchId) batchId = generateUUID();
 
     fetch('/process_batch_scan', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
+        method: 'POST', headers: fetchHeaders(),
         body: JSON.stringify({ so:SO_NUMBER, picks:commitPicks, exceptions: exceptions, batch_id:batchId })
     })
     .then(r => r.json())
@@ -865,7 +865,7 @@ async function prefetchBins(item) {
     if(binCache[item]) return;
     const l = document.getElementById('binList'); l.innerHTML = '<div class="text-center" style="padding:20px;">Loading...</div>';
     try { 
-        const r = await fetch('/get_item_bins', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({item}) }); 
+        const r = await fetch('/get_item_bins', { method: 'POST', headers: fetchHeaders(), body: JSON.stringify({item}) }); 
         const d = await r.json(); 
         if(d.status === 'success') { binCache[item] = d.bins; renderBinList(d.bins); } else { l.innerText = d.msg; }
     } catch(e) { l.innerText = 'Connection Failed'; }

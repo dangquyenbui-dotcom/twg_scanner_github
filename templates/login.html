@@ -168,6 +168,7 @@
             {% endwith %}
 
             <form method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="form-group">
                     <label>User ID</label>
                     <input type="text" name="userid" id="userInput" class="scan-input" 
@@ -240,6 +241,38 @@
                 });
             }
         });
+    </script>
+
+    <script>
+    // ============================================================
+    // DEVICE GATE (Client-Side Fallback)
+    // Secondary check — catches desktop browsers that may have
+    // spoofed a mobile User-Agent to bypass server-side detection.
+    // Checks for touch capability AND small screen dimensions.
+    // ============================================================
+    (function() {
+        var hasTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+        var isSmallScreen = (window.screen.width <= 1024);
+
+        if (!hasTouch || !isSmallScreen) {
+            document.body.innerHTML = '';
+            document.body.style.cssText = 'margin:0;padding:0;background:#1a202c;display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;';
+
+            var card = document.createElement('div');
+            card.style.cssText = 'background:#fff;border-radius:16px;box-shadow:0 20px 40px rgba(0,0,0,0.3);max-width:420px;width:100%;overflow:hidden;text-align:center;';
+            card.innerHTML = '<div style="background:linear-gradient(135deg,#1a202c,#2d3748);padding:24px 20px;">'
+                + '<img src="/static/logo/twg.png" alt="TWG" style="height:48px;margin-bottom:10px;">'
+                + '<p style="font-size:14px;font-weight:700;color:#a0aec0;letter-spacing:2px;text-transform:uppercase;margin:0;">Warehouse Management</p>'
+                + '</div>'
+                + '<div style="padding:32px 24px;">'
+                + '<div style="font-size:64px;margin-bottom:16px;">&#128683;</div>'
+                + '<h1 style="font-size:20px;font-weight:800;color:#c53030;margin:0 0 12px;text-transform:uppercase;">Device Not Supported</h1>'
+                + '<p style="font-size:14px;color:#4a5568;line-height:1.6;margin:0;">This application requires a handheld barcode scanner or mobile device. Desktop browsers are not permitted.</p>'
+                + '</div>';
+
+            document.body.appendChild(card);
+        }
+    })();
     </script>
 </body>
 </html>

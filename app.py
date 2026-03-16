@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
+from flask_wtf.csrf import CSRFProtect
 from config import Config
 import pyodbc
 import logging
@@ -8,12 +9,14 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import threading
+import html as html_mod
 
 # Configure Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 app = Flask(__name__)
 app.config.from_object(Config)
+csrf = CSRFProtect(app)
 
 # --- GLOBAL CACHE ---
 DB_COLS = {
@@ -133,16 +136,24 @@ def send_bin_report_email(report_data):
             # Support comma-separated recipients (e.g. "a@co.com,b@co.com")
             ic_recipients = [e.strip() for e in ic_email_raw.split(',') if e.strip()]
 
-            # Build subject line
+            # Build subject line (plain text — no HTML escaping needed,
+            # but strip any newlines to prevent email header injection)
+            def _clean_header(v):
+                return str(v).replace('\r', '').replace('\n', ' ').strip()
+
             subject = (
                 f"[IC Action Required] Bin Report — "
-                f"{report_data.get('bin', 'N/A')} | "
-                f"{report_data.get('reason', 'Issue Reported')} | "
-                f"Item {report_data.get('item', 'N/A')}"
+                f"{_clean_header(report_data.get('bin', 'N/A'))} | "
+                f"{_clean_header(report_data.get('reason', 'Issue Reported'))} | "
+                f"Item {_clean_header(report_data.get('item', 'N/A'))}"
             )
 
+            # Escape all user-supplied values to prevent XSS in email clients
+            esc = html_mod.escape
+            safe = {k: esc(str(v)) for k, v in report_data.items()}
+
             # Build HTML email body
-            timestamp = report_data.get('timestamp', datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            timestamp = safe.get('timestamp', esc(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
             html_body = f"""
 <!DOCTYPE html>
 <html>
@@ -176,42 +187,42 @@ def send_bin_report_email(report_data):
         </div>
 
         <div class="alert-banner">
-            <span class="reason">⚠️ {report_data.get('reason', 'Issue Reported')}</span>
+            <span class="reason">⚠️ {safe.get('reason', 'Issue Reported')}</span>
         </div>
 
         <div class="body">
             <table class="detail-grid">
                 <tr>
                     <td class="label">Bin Location</td>
-                    <td class="value highlight">{report_data.get('bin', 'N/A')}</td>
+                    <td class="value highlight">{safe.get('bin', 'N/A')}</td>
                 </tr>
                 <tr>
                     <td class="label">Item Code</td>
-                    <td class="value highlight">{report_data.get('item', 'N/A')}</td>
+                    <td class="value highlight">{safe.get('item', 'N/A')}</td>
                 </tr>
                 <tr>
                     <td class="label">On-Hand Qty</td>
-                    <td class="value">{report_data.get('onhand', 'N/A')}</td>
+                    <td class="value">{safe.get('onhand', 'N/A')}</td>
                 </tr>
                 <tr>
                     <td class="label">Allocated Qty</td>
-                    <td class="value">{report_data.get('alloc', 'N/A')}</td>
+                    <td class="value">{safe.get('alloc', 'N/A')}</td>
                 </tr>
                 <tr>
                     <td class="label">Available Qty</td>
-                    <td class="value">{report_data.get('avail', 'N/A')}</td>
+                    <td class="value">{safe.get('avail', 'N/A')}</td>
                 </tr>
                 <tr>
                     <td class="label">Warehouse</td>
-                    <td class="value">{report_data.get('location', 'N/A')}</td>
+                    <td class="value">{safe.get('location', 'N/A')}</td>
                 </tr>
                 <tr>
                     <td class="label">Sales Order</td>
-                    <td class="value">{report_data.get('so', 'N/A')}</td>
+                    <td class="value">{safe.get('so', 'N/A')}</td>
                 </tr>
                 <tr>
                     <td class="label">Reported By</td>
-                    <td class="value">{report_data.get('picker', 'N/A')}</td>
+                    <td class="value">{safe.get('picker', 'N/A')}</td>
                 </tr>
                 <tr>
                     <td class="label">Report Time</td>
@@ -219,7 +230,7 @@ def send_bin_report_email(report_data):
                 </tr>
             </table>
 
-            {"<div class='notes-section'><div class='notes-label'>Picker Notes</div><div class='notes-text'>" + report_data.get('notes', '') + "</div></div>" if report_data.get('notes') else ""}
+            {"<div class='notes-section'><div class='notes-label'>Picker Notes</div><div class='notes-text'>" + safe.get('notes', '') + "</div></div>" if safe.get('notes') else ""}
         </div>
 
         <div class="footer">
@@ -281,6 +292,45 @@ def send_bin_report_email(report_data):
     # Fire and forget — run in background thread
     thread = threading.Thread(target=_send, daemon=True)
     thread.start()
+
+
+# ===================================================================
+# DEVICE GATE — Block desktop/laptop browsers from accessing the app.
+# This app is designed exclusively for Zebra TC52 handheld scanners
+# and mobile devices. Desktop browsers are not supported.
+# ===================================================================
+
+MOBILE_KEYWORDS = (
+    'mobile', 'android', 'iphone', 'ipad', 'ipod',
+    'webos', 'blackberry', 'opera mini', 'iemobile',
+    'zebra', 'tc52', 'tc51', 'tc72', 'tc77'
+)
+
+def is_mobile_device():
+    """
+    Returns True if the request comes from a mobile/tablet device.
+    Checks the User-Agent header for known mobile keywords.
+    Returns False (desktop) if no User-Agent is present or none match.
+    """
+    ua = request.headers.get('User-Agent', '').lower()
+    if not ua:
+        return False
+    return any(keyword in ua for keyword in MOBILE_KEYWORDS)
+
+@app.before_request
+def enforce_mobile_only():
+    """
+    Blocks all non-mobile devices before any route executes.
+    Exceptions:
+      - /health — monitoring endpoint, must always be reachable
+      - /static/ — Flask's built-in static file serving (needed for unsupported page assets)
+    """
+    if request.path == '/health':
+        return None
+    if request.path.startswith('/static/'):
+        return None
+    if not is_mobile_device():
+        return render_template('unsupported.html'), 403
 
 
 # --- ROUTES ---

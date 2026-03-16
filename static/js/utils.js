@@ -1,4 +1,17 @@
-/* utils.js - Generic Utilities (Audio, UUID, Logs, Device ID, Fullscreen) */
+/* utils.js - Generic Utilities (Audio, UUID, Logs, Device ID, Fullscreen, CSRF) */
+
+// --- CSRF TOKEN ---
+var CSRF_TOKEN = (function() {
+    var meta = document.querySelector('meta[name="csrf-token"]');
+    return meta ? meta.getAttribute('content') : '';
+})();
+
+/** Builds headers for fetch() calls with CSRF token included. */
+function fetchHeaders() {
+    var h = {'Content-Type': 'application/json'};
+    if (CSRF_TOKEN) h['X-CSRFToken'] = CSRF_TOKEN;
+    return h;
+}
 
 // --- UTILS ---
 function generateUUID() {

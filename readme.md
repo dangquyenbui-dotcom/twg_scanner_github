@@ -2,8 +2,8 @@
 
 ## Project Status
 
-**Version:** 1.11.0
-**Phase:** 5 — Batch Scanning with Hardened Commit Logic + Short-Pick Exception Workflow + Zero Pick Workflow + IC Bin Reporting + Pending Picks Dashboard + Session Protection & Progress Tracking
+**Version:** 1.12.0
+**Phase:** 6 — Batch Scanning with Hardened Commit Logic + Short-Pick Exception Workflow + Zero Pick Workflow + IC Bin Reporting + Pending Picks Dashboard + Session Protection & Progress Tracking + Desktop Device Blocking
 **Current Mode:** LIVE COMMIT MODE — The application validates all logic (inventory availability, order limits, location checks) and performs live SQL `UPDATE` and `INSERT` operations against the database. All writes are wrapped in a single transaction with automatic rollback on any failure. Post-commit verification detects concurrent modifications and logs warnings without rollback.
 
 ---
@@ -44,9 +44,10 @@ twg_scanner_github/
 │   │   └── twg-512.png     # PWA icon (512x512)
 │   └── manifest.json       # PWA manifest for home screen install
 ├── templates/
-│   ├── login.html          # User authentication screen
+│   ├── login.html          # User authentication screen (includes client-side device gate fallback)
 │   ├── dashboard.html      # Main menu with clock, app grid, pending picks detection, and localStorage cleanup
-│   └── picking.html        # Order picking interface (SO entry + pick screen + all modals + progress bar + picker warning)
+│   ├── picking.html        # Order picking interface (SO entry + pick screen + all modals + progress bar + picker warning)
+│   └── unsupported.html    # Desktop/laptop browser blocking page (403 response)
 └── README.md               # This file
 ```
 
@@ -79,7 +80,7 @@ The `IC_EMAIL` field supports **comma-separated multiple recipients**. All liste
 
 The `Config` class loads all values from environment variables with fallback defaults. Key configuration groups:
 
-- **`APP_VERSION`** — Centralized version string used as a cache-buster query parameter on all static assets (`?v=1.11.0`). Bump this value on every deploy to force Cloudflare and browser caches to fetch fresh JS, CSS, images, and the PWA manifest. All three templates (`login.html`, `dashboard.html`, `picking.html`) read this value via `{{ config.APP_VERSION }}`.
+- **`APP_VERSION`** — Centralized version string used as a cache-buster query parameter on all static assets (`?v=1.12.0`). Bump this value on every deploy to force Cloudflare and browser caches to fetch fresh JS, CSS, images, and the PWA manifest. All three templates (`login.html`, `dashboard.html`, `picking.html`) read this value via `{{ config.APP_VERSION }}`.
 
 - **`DB_AUTH`** — Used for inventory tables (`ScanOnhand2`), user authentication (`ScanUsers`), UPC mapping (`ScanItem`), and audit logging (`ScanBinTran2`).
 
@@ -142,7 +143,7 @@ All static asset references in templates use a version query parameter sourced f
 <script src="{{ url_for('static', filename='js/picking.js') }}?v={{ config.APP_VERSION }}"></script>
 ```
 
-This covers CSS files, JavaScript files, logo images, PWA icon images, and the manifest.json file. When `APP_VERSION` is bumped (e.g., from `1.10.0` to `1.11.0`), every asset URL changes, forcing both Cloudflare edge caches and browser/PWA caches to fetch fresh copies.
+This covers CSS files, JavaScript files, logo images, PWA icon images, and the manifest.json file. When `APP_VERSION` is bumped (e.g., from `1.11.0` to `1.12.0`), every asset URL changes, forcing both Cloudflare edge caches and browser/PWA caches to fetch fresh copies.
 
 **Deployment workflow:**
 
@@ -152,6 +153,59 @@ This covers CSS files, JavaScript files, logo images, PWA icon images, and the m
 4. (Optional) Purge Cloudflare cache once — after that, the version string handles cache invalidation automatically.
 
 The login page footer and dashboard footer version labels also read from `APP_VERSION` dynamically, so the displayed version always matches the deployed code.
+
+---
+
+## Device Restriction (v1.12.0)
+
+This application enforces a **mobile-only access policy**. Desktop and laptop browsers are hard-blocked at the server level and cannot access any page, including login.
+
+### How It Works
+
+**1. Server-Side (Primary Enforcement):**
+
+A Flask `@app.before_request` hook (`enforce_mobile_only()`) inspects the `User-Agent` header on every incoming request. If the header does not contain a recognized mobile keyword, the server returns a `403 Forbidden` response with a branded "Device Not Supported" page (`unsupported.html`). The login form is never rendered, and no session can be created.
+
+**Exempt paths:**
+- `/health` — Monitoring endpoint, must always be reachable from any device
+- `/static/` — Static files (CSS, JS, images) needed by the unsupported page itself
+
+**2. Client-Side (Backup Enforcement):**
+
+The login page includes a JavaScript check that detects desktop environments via two independent signals:
+- **Touch capability:** `('ontouchstart' in window) || (navigator.maxTouchPoints > 0)`
+- **Screen size:** `window.screen.width <= 1024`
+
+If either check fails (no touch support OR screen wider than 1024px), the entire login form is destroyed and replaced with a "Device Not Supported" message. This catches edge cases where a desktop browser spoofs a mobile User-Agent — `window.screen.width` reflects the physical monitor size and cannot be changed via browser DevTools.
+
+### Recognized Mobile Keywords
+
+The server-side check looks for any of these strings in the User-Agent header (case-insensitive):
+
+| Keyword | Matches |
+|---------|---------|
+| `mobile` | Most mobile browsers |
+| `android` | Android phones and tablets |
+| `iphone` | iPhones |
+| `ipad` | iPads |
+| `ipod` | iPod Touch |
+| `webos` | webOS devices |
+| `blackberry` | BlackBerry devices |
+| `opera mini` | Opera Mini browser |
+| `iemobile` | Internet Explorer Mobile |
+| `zebra` | Zebra devices (generic) |
+| `tc52` | Zebra TC52 (primary target) |
+| `tc51` | Zebra TC51 |
+| `tc72` | Zebra TC72 |
+| `tc77` | Zebra TC77 |
+
+To add support for a new device, add its User-Agent keyword to the `MOBILE_KEYWORDS` tuple in `app.py`.
+
+### Supported Devices
+
+- **Primary:** Zebra TC52 (Android, Chrome browser)
+- **Also supported:** Zebra TC51, TC72, TC77
+- **General:** Any Android phone/tablet, iPhone, iPad, iPod, and other mobile browsers
 
 ---
 
@@ -972,6 +1026,8 @@ Picker taps flag -> Client POST /report_bin -> Flask validates & responds 200 ->
 | Bin report validation | Reason required, notes truncated | TWG-branded alert if no reason selected; notes capped at 500 chars |
 | Bin report email | Background thread try/catch | `logging.error()` on SMTP failure; picker always gets success response |
 | Stale data cleanup | 7-day threshold on timestamp keys | Automatic removal of abandoned pick sessions on dashboard load |
+| Device gate (server) | `@app.before_request` User-Agent check | Returns 403 "Device Not Supported" page for desktop browsers |
+| Device gate (client) | Touch + screen width check in login.html | Destroys login form if desktop environment detected (fallback) |
 
 ---
 
@@ -1116,6 +1172,7 @@ Picker taps flag -> Client POST /report_bin -> Flask validates & responds 200 ->
 
 | Version | Changes |
 |---------|---------|
+| **1.12.0** | Desktop/laptop browser blocking — server-side `@app.before_request` device gate with `MOBILE_KEYWORDS` whitelist, client-side touch/screen-size fallback on login page, `unsupported.html` 403 blocking page |
 | **1.11.0** | Order progress bar, leave-page confirmation guard, picker assignment soft-check, localStorage timestamp tracking, 7-day stale data cleanup sweep, `clearLocal()` orphaned keys bugfix |
 | **1.10.0** | Pending picks dashboard notification, user-scoped localStorage keys (cross-user fix), old-key migration logic, APP_VERSION cache-busting for PWA |
 | **1.8.0** | IC Bin Reporting via email, bin report modal, background SMTP threading, multi-recipient support |

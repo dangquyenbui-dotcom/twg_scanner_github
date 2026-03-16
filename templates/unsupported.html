@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#1a202c">
+    <title>TWG Warehouse — Device Not Supported</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            background: #1a202c;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 16px;
+        }
+        .block-card {
+            width: 100%;
+            max-width: 420px;
+            background: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        .block-brand {
+            background: linear-gradient(135deg, #1a202c 0%, #2d3748 100%);
+            padding: 28px 20px 22px;
+            text-align: center;
+        }
+        .block-brand img { height: 48px; margin-bottom: 10px; }
+        .block-brand-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: #a0aec0;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin: 0;
+        }
+        .block-body {
+            padding: 32px 24px;
+            text-align: center;
+        }
+        .block-icon {
+            font-size: 64px;
+            display: block;
+            margin-bottom: 16px;
+        }
+        .block-title {
+            font-size: 20px;
+            font-weight: 800;
+            color: #c53030;
+            margin: 0 0 12px 0;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .block-message {
+            font-size: 14px;
+            color: #4a5568;
+            line-height: 1.6;
+            margin: 0 0 20px 0;
+        }
+        .block-device-info {
+            background: #f7fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 14px 16px;
+            margin-top: 16px;
+        }
+        .block-device-label {
+            font-size: 10px;
+            font-weight: 700;
+            color: #718096;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 4px;
+        }
+        .block-device-list {
+            font-size: 12px;
+            color: #a0aec0;
+            line-height: 1.8;
+            margin: 0;
+        }
+        .block-footer {
+            border-top: 1px solid #edf2f7;
+            padding: 14px 20px;
+            text-align: center;
+            background: #f7fafc;
+            border-radius: 0 0 16px 16px;
+        }
+        .block-footer p {
+            font-size: 9.5px;
+            color: #a0aec0;
+            line-height: 1.5;
+            letter-spacing: 0.2px;
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="block-card">
+        <div class="block-brand">
+            <img src="/static/logo/twg.png" alt="TWG">
+            <p class="block-brand-title">Warehouse Management</p>
+        </div>
+
+        <div class="block-body">
+            <span class="block-icon">&#128683;</span>
+            <h1 class="block-title">Device Not Supported</h1>
+            <p class="block-message">
+                This application is designed exclusively for handheld barcode scanners
+                and mobile devices. Desktop and laptop computers are not supported.
+            </p>
+            <p class="block-message">
+                Please use an authorized Zebra handheld scanner to access the system.
+            </p>
+
+            <div class="block-device-info">
+                <div class="block-device-label">Supported Devices</div>
+                <p class="block-device-list">
+                    Zebra TC52 &bull; Zebra TC51 &bull; Zebra TC72 &bull; Zebra TC77<br>
+                    Other mobile &amp; tablet devices
+                </p>
+            </div>
+        </div>
+
+        <div class="block-footer">
+            <p>
+                If you believe this is an error, contact your warehouse supervisor or IT department.
+            </p>
+        </div>
+    </div>
+</body>
+</html>
