@@ -169,6 +169,7 @@ def send_bin_report_email(report_data):
 
             subject = (
                 f"[IC Action Required] Bin Report — "
+                f"Warehouse {_clean_header(report_data.get('location', 'N/A'))} | "
                 f"{_clean_header(report_data.get('bin', 'N/A'))} | "
                 f"{_clean_header(report_data.get('reason', 'Issue Reported'))} | "
                 f"Item {_clean_header(report_data.get('item', 'N/A'))}"
