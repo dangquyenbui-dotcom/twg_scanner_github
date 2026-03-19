@@ -2,9 +2,9 @@
 
 ## Project Status
 
-**Version:** 1.12.0
-**Phase:** 6 — Batch Scanning with Hardened Commit Logic + Short-Pick Exception Workflow + Zero Pick Workflow + IC Bin Reporting + Pending Picks Dashboard + Session Protection & Progress Tracking + Desktop Device Blocking
-**Current Mode:** LIVE COMMIT MODE — The application validates all logic (inventory availability, order limits, location checks) and performs live SQL `UPDATE` and `INSERT` operations against the database. All writes are wrapped in a single transaction with automatic rollback on any failure. Post-commit verification detects concurrent modifications and logs warnings without rollback.
+**Version:** 1.12.1
+**Phase:** 6 — Batch Scanning with Hardened Commit Logic + Short-Pick Exception Workflow + Zero Pick Workflow + IC Bin Reporting + Pending Picks Dashboard + Session Protection & Progress Tracking + Desktop Device Blocking + SQL Performance Optimization
+**Current Mode:** LIVE COMMIT MODE — The application validates all logic (inventory availability, order limits, location checks) and performs live SQL `UPDATE` and `INSERT` operations against the database. All writes are wrapped in a single transaction with automatic rollback on any failure. Read operations use separate read-only connections with `READ UNCOMMITTED` isolation to avoid lock contention on the production SQL Server. Post-commit verification detects concurrent modifications and logs warnings without rollback.
 
 ---
 
@@ -87,6 +87,8 @@ The `Config` class loads all values from environment variables with fallback def
 - **`DB_ORDERS`** — Used for the sales order tables (`SOTRAN`, `SOMAST`).
 
 - **`SMTP_*` / `IC_EMAIL`** — Office 365 SMTP connection settings and recipient list for the IC Bin Report email feature.
+
+- **`WTF_CSRF_TIME_LIMIT`** — CSRF token lifetime in seconds. Set to `43200` (12 hours) to cover a full warehouse shift. Prevents "CSRF token expired" errors when scanners sit idle between shifts. Default Flask-WTF value is 3600 (1 hour), which is too short for warehouse use.
 
 - **`SIMULATION_MODE`** — Reserved flag. Set to `False` for live database writes (current default). Set to `True` to validate logic without committing changes (not currently enforced in routes — reserved for future use).
 
@@ -306,7 +308,7 @@ On the first login, the application runs `detect_columns()` to dynamically ident
 | Users location column | `location_id` | `location` | `location` |
 | BinTran2 UPC column | exists (`True`) | missing (`False`) | `False` |
 
-The detection runs `SELECT TOP 1 *` against each table and inspects `cursor.description` for column names. This avoids hard-coding column names that may differ between warehouse installations.
+The detection runs `SELECT TOP 0 *` (returns zero rows — only metadata) with `WITH (NOLOCK)` against each table and inspects `cursor.description` for column names. This avoids hard-coding column names that may differ between warehouse installations. The `TOP 0` optimization ensures no data is read from disk — only the column schema is retrieved.
 
 ---
 
@@ -473,47 +475,26 @@ Receives a bin issue report from the picker and sends an email to the IC (Invent
 
 The `exceptions` object is optional. It maps `tranlineno` (as string) to a short-pick reason code. These codes are written to the `scanresult` column in `ScanBinTran2` for lines that were partially picked. Valid codes are `SHORT`, `DMG`, `NOFND`, `BADLC` (max 10 characters, truncated for safety).
 
-**The commit process follows 6 sequential phases:**
+**The commit process follows 5 sequential phases:**
+
+A `SET LOCK_TIMEOUT 10000` (10 seconds) is applied at the start of each batch transaction to prevent indefinite waits on locked rows.
 
 ---
 
-#### Phase 1: Pre-Aggregate Line Totals
+#### Phase 1: Pre-Aggregate Totals
 
-Before any database reads, picks are aggregated by `tranlineno`. Multiple picks for the same order line (e.g., from different bins) are summed into a single quantity per line. This aggregated total is used for the SOTRAN over-ship validation.
+Before any database writes, picks are aggregated at two levels:
 
-**Zero-qty picks** (from the Zero Pick workflow) are excluded from this aggregation. They do not affect inventory or SOTRAN — their only purpose is to write an audit record in Phase 5.
+1. **Line-level totals** (`line_updates`): Aggregated by `tranlineno` for SOTRAN validation. Multiple picks for the same order line (e.g., from different bins) are summed into a single quantity per line.
+2. **Inventory-level totals** (`inv_updates`): Aggregated by `(item, bin)` for ScanOnhand2. Multiple picks for the same item from the same bin are summed, reducing the number of UPDATE statements sent to the server.
 
----
-
-#### Phase 2: Pre-Commit Validation (Read-Only)
-
-All picks are validated against the current database state before any UPDATE is executed. If any check fails, the entire batch is rejected immediately with no data changes.
-
-**Inventory check (per pick):**
-```sql
-SELECT onhand, ISNULL(aloc, 0) as current_alloc
-FROM ScanOnhand2
-WHERE item=? AND bin=? AND loctid=?
-```
-- Verifies the row exists (item is in that bin at that location).
-- Computes `available = onhand - current_alloc`.
-- Rejects if `available < requested_qty`.
-
-**Order check (per aggregated line):**
-```sql
-SELECT qtyord, shipqty, (qtyord - shipqty) as remaining
-FROM SOTRAN
-WHERE sono=? AND tranlineno=? AND item=?
-```
-- Verifies the order line exists.
-- Computes remaining pickable quantity.
-- Rejects if `remaining < aggregated_qty` (would cause over-shipment).
+**Zero-qty picks** (from the Zero Pick workflow) are excluded from both aggregations. They do not affect inventory or SOTRAN — their only purpose is to write an audit record in Phase 4.
 
 ---
 
-#### Phase 3: Inventory Update (ScanOnhand2)
+#### Phase 2: Inventory Update (ScanOnhand2)
 
-For each pick, the allocation is incremented and available quantity is recomputed.
+For each unique `(item, bin)` combination, a single aggregated UPDATE increments the allocation and recomputes available quantity.
 
 ```sql
 UPDATE ScanOnhand2
@@ -525,15 +506,15 @@ WHERE item=? AND bin=? AND loctid=?
   AND (onhand - ISNULL(aloc, 0)) >= ?    -- SQL-LEVEL GUARD
 ```
 
-**SQL-level guard:** The `WHERE` clause includes `(onhand - ISNULL(aloc, 0)) >= ?` which prevents the update from executing if another user has allocated stock between the pre-check and this update (race condition protection). If `rowcount == 0`, the transaction is rolled back with a clear error message indicating a likely concurrent pick.
+**SQL-level guard:** The `WHERE` clause includes `(onhand - ISNULL(aloc, 0)) >= ?` which prevents the update from executing if insufficient stock is available (race condition protection). If `rowcount == 0`, the transaction is rolled back with a clear error message indicating a likely concurrent pick. This eliminates the need for a separate pre-validation SELECT — the WHERE guard is the real safety net.
 
 ---
 
-#### Phase 4: Sales Order Update (SOTRAN)
+#### Phase 3: Sales Order Update (SOTRAN)
 
 For each aggregated order line, the shipped quantity is incremented.
 
-Before the update, the current `shipqty` is read and stored to compute the expected post-commit value for Phase 6 verification.
+Before the update, the current `shipqty` is read and stored to compute the expected post-commit value for Phase 5 verification.
 
 ```sql
 UPDATE SOTRAN
@@ -547,7 +528,9 @@ WHERE sono=? AND tranlineno=? AND item=?
 
 ---
 
-#### Phase 5: Audit Log Insert (ScanBinTran2)
+#### Phase 4: Audit Log Insert (ScanBinTran2)
+
+All audit rows are inserted in a single batched operation using `cursor.fast_executemany = True` with `cursor.executemany()`. This sends all rows in one round-trip to SQL Server instead of individual INSERT statements, significantly reducing network overhead for large batches.
 
 One row is inserted per pick (not per aggregated line) to maintain full granularity of which bin each unit came from. **Zero-qty picks are included in this phase** — this is their only database write, ensuring a full audit trail for lines the picker could not fulfill.
 
@@ -567,7 +550,7 @@ For zero-qty picks, `quantity` is `0` and `binfr` (bin) is empty since the picke
 
 ---
 
-#### Phase 6: Post-Commit Verification (Read-Only)
+#### Phase 5: Post-Commit Verification (Read-Only)
 
 After `conn.commit()` succeeds, the application performs read-only verification to confirm the data landed correctly. **This phase never triggers a rollback** — the data is already committed. Failures are logged at `CRITICAL` level for manual review.
 
@@ -600,9 +583,10 @@ If any post-commit warnings are generated, they are included in the response `wa
 
 #### Error Handling
 
-- Any exception in Phases 1-5 triggers `conn.rollback()` and returns `{ "status": "error", "msg": "..." }`.
+- Any exception in Phases 1-4 triggers `conn.rollback()` and returns `{ "status": "error", "msg": "..." }`.
 - All quantities are cast to `int()` to avoid floating-point rounding issues.
 - `ISNULL()` wrappers handle NULL allocation values in the database.
+- `SET LOCK_TIMEOUT 10000` prevents indefinite waits — if a row is locked by another transaction for more than 10 seconds, the query fails and the batch is rolled back.
 
 ---
 
@@ -1009,7 +993,9 @@ Picker taps flag -> Client POST /report_bin -> Flask validates & responds 200 ->
 
 | Layer | Mechanism | Behavior |
 |-------|-----------|----------|
-| DB Connection | `get_db_connection()` returns `None` | Routes flash "Database Offline" or return JSON error |
+| DB Connection (write) | `get_db_connection()` returns `None` | Routes flash "Database Offline" or return JSON error |
+| DB Connection (read) | `get_readonly_connection()` returns `None` | Routes flash "Database Offline" or return JSON error |
+| CSRF Token Expired | `CSRFError` handler catches 400 | Redirects to login with "Session expired" flash message |
 | Login | Try/catch around query | Flashes specific error to login form |
 | Picker Validation | `SOMAST.picker` check | Rejects order if no picker assigned |
 | Picking query | Try/catch with `finally: conn.close()` | Flashes database error to picking page |
@@ -1034,9 +1020,13 @@ Picker taps flag -> Client POST /report_bin -> Flask validates & responds 200 ->
 ## Security Notes
 
 - All SQL queries use **parameterized placeholders** (`?`) to prevent SQL injection.
-- Database connections use `autocommit=False` with explicit `commit()` or `rollback()`.
+- **Writable connections** use `autocommit=False` with explicit `commit()` or `rollback()`. Command timeout is 30 seconds.
+- **Read-only connections** use `autocommit=True` (no open transaction, no held locks). Command timeout is 15 seconds.
+- Both connection types set `TRANSACTION ISOLATION LEVEL READ UNCOMMITTED` at session level (equivalent to `NOLOCK` on all SELECTs). Individual queries also carry `WITH (NOLOCK)` hints as belt-and-suspenders documentation.
+- ODBC connection pooling is enabled globally (`pyodbc.pooling = True`) to reduce connection overhead.
 - Flask sessions are signed with `SECRET_KEY`.
-- Connection timeout is set to 15 seconds.
+- Connection timeout is set to 15 seconds. Write queries have a 30-second command timeout; read queries have a 15-second command timeout.
+- CSRF tokens have a 12-hour lifetime (`WTF_CSRF_TIME_LIMIT = 43200`) to cover full warehouse shifts. Expired tokens are handled gracefully — a `CSRFError` handler redirects to the login page with a "Session expired" flash message instead of showing an ugly 400 error.
 - Passwords are stored and compared as plain text in `ScanUsers` (legacy system constraint).
 - Exception codes are truncated server-side to max 10 characters to prevent injection via oversized values.
 - Bin report notes are truncated server-side to max 500 characters to prevent abuse.
@@ -1044,6 +1034,7 @@ Picker taps flag -> Client POST /report_bin -> Flask validates & responds 200 ->
 - The `APP_VERSION` cache-buster is not a security feature — it exists purely for cache invalidation.
 - localStorage keys are user-scoped to prevent cross-user data visibility on shared devices.
 - Navigation guards prevent accidental loss of unsubmitted work.
+- Write transactions set `LOCK_TIMEOUT 10000` (10 seconds) to prevent indefinite waits on locked rows during batch commits.
 
 ---
 
@@ -1162,9 +1153,77 @@ Picker taps flag -> Client POST /report_bin -> Flask validates & responds 200 ->
 
 12. **Submit** — Picker taps Submit. If any lines are short-picked, the exception modal collects reason codes. A branded confirm dialog shows the pick count. On confirmation, the batch is sent to the server.
 
-13. **Server Commit** — The 6-phase transactional pipeline validates, updates inventory, updates the sales order, writes the audit log, and verifies post-commit. On success, localStorage is cleared and the page reloads.
+13. **Server Commit** — The 5-phase transactional pipeline pre-aggregates, updates inventory, updates the sales order, writes the audit log (batched), and verifies post-commit. On success, localStorage is cleared and the page reloads.
 
 14. **Navigation Protection** — At any point, if the picker tries to exit or change orders with unsaved picks, a branded dialog warns them. The browser's native "Leave page?" dialog is also active as a safety net.
+
+---
+
+## SQL Performance & Production Safety (v1.12.1)
+
+The application connects to the production SQL Server (`twg-sql-01`) which also serves the ERP system and other business applications. All database access is optimized to minimize lock contention and connection overhead.
+
+### Connection Architecture
+
+| Connection Type | Function | autocommit | Isolation Level | Command Timeout | Used By |
+|----------------|----------|------------|-----------------|-----------------|---------|
+| **Writable** | `get_db_connection()` | `False` | `READ UNCOMMITTED` | 30s | `/login` (userstat UPDATE), `/process_batch_scan` |
+| **Read-only** | `get_readonly_connection()` | `True` | `READ UNCOMMITTED` | 15s | `/picking`, `/get_item_bins`, `/validate_bin`, `detect_columns()` |
+
+**Key design decisions:**
+
+- **Separate read/write connections:** Read-only routes (`/picking`, `/get_item_bins`, `/validate_bin`) use `autocommit=True` connections which never hold open transactions or shared locks. This prevents read queries from blocking ERP writes on the production server.
+- **`READ UNCOMMITTED` isolation level:** Set at the connection session level via `SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED`. All SELECTs on both connection types behave as `NOLOCK` reads. Individual queries also carry `WITH (NOLOCK)` hints as visible documentation.
+- **ODBC connection pooling:** Enabled globally via `pyodbc.pooling = True`. Reuses established connections instead of opening new TCP connections for each request, reducing overhead on both the app server and SQL Server.
+- **Command timeouts:** Write operations allow 30 seconds (batch commits can be multi-step). Read operations are capped at 15 seconds — if a read query takes longer, it indicates a problem.
+- **Connection timeout:** Both connection types use a 15-second connection timeout to fail fast if the SQL Server is unreachable.
+
+### Lock Contention Prevention
+
+| Technique | Where Applied | Purpose |
+|-----------|---------------|---------|
+| `WITH (NOLOCK)` hints | All SELECT queries | Prevents shared locks on read; reads never block writes |
+| `READ UNCOMMITTED` isolation | Both connection types (session-level) | Belt-and-suspenders with NOLOCK; ensures no query is missed |
+| `autocommit=True` on reads | Read-only connection | No open transaction held during read requests |
+| `SET LOCK_TIMEOUT 10000` | `/process_batch_scan` | Write transactions wait max 10 seconds for locked rows before failing |
+| Aggregated UPDATEs | Inventory updates in batch commit | Multiple picks for the same `(item, bin)` are summed into a single UPDATE, reducing row-level lock duration |
+| Batched INSERTs | Audit log in batch commit | `fast_executemany` sends all audit rows in one round-trip instead of N individual INSERTs |
+| `SELECT TOP 0 *` | Column detection (`detect_columns()`) | Returns only metadata (column names) — zero data read from disk |
+| SQL template outside loops | UPDATE and INSERT statements | SQL string is built once and reused with different parameters, reducing parse overhead |
+
+### Production Impact Summary
+
+Before optimization, the application used writable connections (`autocommit=False`) for all routes, including pure read operations like viewing order lines and checking bin availability. This meant every page load held an open transaction with shared locks on the production database, potentially blocking ERP operations.
+
+After optimization:
+- **Read routes** hold zero locks and zero open transactions against production tables
+- **Write routes** hold locks only during the actual UPDATE/INSERT phase, with a 10-second timeout ceiling
+- **Batch commits** execute fewer SQL statements (aggregated UPDATEs + batched INSERTs) for shorter lock duration
+- **Column detection** reads zero data rows (only schema metadata)
+
+---
+
+## CSRF Token Management (v1.12.1)
+
+### Problem
+
+Zebra TC52 scanners often sit idle between warehouse shifts (overnight, lunch breaks). The default Flask-WTF CSRF token lifetime is 3600 seconds (1 hour), causing pickers to see a "Bad Request — The CSRF token has expired" error when they try to sign in after an idle period.
+
+### Solution
+
+Two changes address this:
+
+1. **Extended token lifetime:** `WTF_CSRF_TIME_LIMIT = 43200` (12 hours) in `config.py`. Covers a full warehouse shift without expiring.
+
+2. **Graceful error handler:** A `@app.errorhandler(CSRFError)` handler catches any expired/missing token error and redirects to the login page with a "Session expired. Please sign in again." flash message. This replaces the ugly default 400 error page with a clean user experience — the login form reloads with a fresh CSRF token automatically.
+
+### CSRF Token Locations
+
+| Location | Type | Purpose |
+|----------|------|---------|
+| `login.html` hidden input | `<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">` | Protects the login POST form |
+| `picking.html` meta tag | `<meta name="csrf-token" content="{{ csrf_token() }}">` | Read by `utils.js` for AJAX `X-CSRFToken` headers |
+| `utils.js` CSRF_TOKEN var | Reads from meta tag on page load | Included in all `fetch()` request headers via `getHeaders()` |
 
 ---
 
@@ -1172,6 +1231,7 @@ Picker taps flag -> Client POST /report_bin -> Flask validates & responds 200 ->
 
 | Version | Changes |
 |---------|---------|
+| **1.12.1** | SQL performance optimization for production server (`twg-sql-01`) — separate read-only connections (`autocommit=True`, no locks), `READ UNCOMMITTED` isolation level on all connections, `WITH (NOLOCK)` on all SELECT queries, ODBC connection pooling (`pyodbc.pooling = True`), aggregated inventory UPDATEs by `(item, bin)`, batched audit INSERTs via `fast_executemany`, `SET LOCK_TIMEOUT 10000` on write transactions, `SELECT TOP 0` for column detection, command timeouts (30s write / 15s read). CSRF token lifetime extended to 12 hours for warehouse shifts, graceful `CSRFError` handler redirects to login instead of 400 error page |
 | **1.12.0** | Desktop/laptop browser blocking — server-side `@app.before_request` device gate with `MOBILE_KEYWORDS` whitelist, client-side touch/screen-size fallback on login page, `unsupported.html` 403 blocking page |
 | **1.11.0** | Order progress bar, leave-page confirmation guard, picker assignment soft-check, localStorage timestamp tracking, 7-day stale data cleanup sweep, `clearLocal()` orphaned keys bugfix |
 | **1.10.0** | Pending picks dashboard notification, user-scoped localStorage keys (cross-user fix), old-key migration logic, APP_VERSION cache-busting for PWA |
