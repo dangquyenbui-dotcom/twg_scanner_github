@@ -27,6 +27,11 @@ class Config:
     SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD', '')
     IC_EMAIL = os.environ.get('IC_EMAIL', '')
 
+    # --- CSRF / SESSION ---
+    # Warehouse scanners sit idle between shifts; extend token lifetime
+    # to cover a full 12-hour shift so pickers never see "token expired".
+    WTF_CSRF_TIME_LIMIT = 43200  # 12 hours (in seconds)
+
     # --- SYSTEM SETTINGS ---
     # Set to False to actually UPDATE inventory and orders (LIVE MODE).
     # Set to True to only validate logic without changing data (TEST MODE).

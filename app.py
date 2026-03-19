@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
-from flask_wtf.csrf import CSRFProtect
+from flask_wtf.csrf import CSRFProtect, CSRFError
 from config import Config
 import pyodbc
 pyodbc.pooling = True  # Enable ODBC connection pooling
@@ -18,6 +18,12 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 app = Flask(__name__)
 app.config.from_object(Config)
 csrf = CSRFProtect(app)
+
+@app.errorhandler(CSRFError)
+def handle_csrf_error(e):
+    """Gracefully handle expired/missing CSRF tokens — redirect to login instead of ugly 400 page."""
+    flash("Session expired. Please sign in again.", "error")
+    return redirect(url_for('login'))
 
 # --- GLOBAL CACHE ---
 DB_COLS = {
