@@ -42,6 +42,9 @@ def get_db_connection():
     try:
         conn = pyodbc.connect(_build_conn_str(), timeout=15, autocommit=False)
         conn.timeout = 30  # Command timeout: 30s max per query
+        # READ UNCOMMITTED: all SELECTs on this connection act as NOLOCK.
+        # UPDATEs/INSERTs still acquire proper exclusive locks (by design).
+        conn.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED")
         return conn
     except Exception as e:
         logging.error(f"DB Connection Failed: {e}")
@@ -52,6 +55,9 @@ def get_readonly_connection():
     try:
         conn = pyodbc.connect(_build_conn_str(), timeout=15, autocommit=True)
         conn.timeout = 15  # Read queries should finish fast
+        # READ UNCOMMITTED: all SELECTs on this connection act as NOLOCK.
+        # Belt-and-suspenders with the WITH (NOLOCK) hints on individual queries.
+        conn.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED")
         return conn
     except Exception as e:
         logging.error(f"DB ReadOnly Connection Failed: {e}")
@@ -759,7 +765,7 @@ def process_batch_scan():
 
             # Read current shipqty to compute expected value after update
             cursor.execute(
-                f"SELECT shipqty FROM {Config.DB_ORDERS}.dbo.SOTRAN WHERE sono=? AND tranlineno=? AND item=?",
+                f"SELECT shipqty FROM {Config.DB_ORDERS}.dbo.SOTRAN WITH (NOLOCK) WHERE sono=? AND tranlineno=? AND item=?",
                 (so_num, line_no, item_code)
             )
             pre_row = cursor.fetchone()
