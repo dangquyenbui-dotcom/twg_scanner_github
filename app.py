@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, redirect, url_for, session, f
 from flask_wtf.csrf import CSRFProtect
 from config import Config
 import pyodbc
+pyodbc.pooling = True  # Enable ODBC connection pooling
 import logging
 import datetime
 import uuid
@@ -27,20 +28,33 @@ DB_COLS = {
     'ScanItem_UPC': False
 }
 
-def get_db_connection():
-    """Establishes a connection to the SQL Server with explicit timeout."""
-    conn_str = (
+def _build_conn_str():
+    return (
         f"DRIVER={app.config['DB_DRIVER']};"
         f"SERVER={app.config['DB_SERVER']};"
         f"DATABASE={app.config['DB_AUTH']};"
         f"UID={app.config['DB_UID']};"
         f"PWD={app.config['DB_PWD']};"
     )
+
+def get_db_connection():
+    """Writable connection (autocommit=False) for transaction-based routes."""
     try:
-        # autocommit=False is CRITICAL for our transaction rollback protection
-        return pyodbc.connect(conn_str, timeout=15, autocommit=False) 
+        conn = pyodbc.connect(_build_conn_str(), timeout=15, autocommit=False)
+        conn.timeout = 30  # Command timeout: 30s max per query
+        return conn
     except Exception as e:
         logging.error(f"DB Connection Failed: {e}")
+        return None
+
+def get_readonly_connection():
+    """Read-only connection (autocommit=True) — no open transaction, no held locks."""
+    try:
+        conn = pyodbc.connect(_build_conn_str(), timeout=15, autocommit=True)
+        conn.timeout = 15  # Read queries should finish fast
+        return conn
+    except Exception as e:
+        logging.error(f"DB ReadOnly Connection Failed: {e}")
         return None
 
 def row_to_dict(cursor, row):
@@ -49,9 +63,9 @@ def row_to_dict(cursor, row):
 
 def detect_columns():
     """Dynamically detects column names to handle schema variations (aloc vs alloc)."""
-    if DB_COLS['ScanOnhand2_Loc']: return 
-    
-    conn = get_db_connection()
+    if DB_COLS['ScanOnhand2_Loc']: return
+
+    conn = get_readonly_connection()
     if not conn: return
     
     try:
@@ -59,7 +73,7 @@ def detect_columns():
         
         # 1. Detect Columns in Inventory (ScanOnhand2)
         try:
-            cursor.execute(f"SELECT TOP 1 * FROM {Config.DB_AUTH}.dbo.ScanOnhand2")
+            cursor.execute(f"SELECT TOP 0 * FROM {Config.DB_AUTH}.dbo.ScanOnhand2 WITH (NOLOCK)")
             cols = [c[0].lower() for c in cursor.description]
             
             # Location Column
@@ -77,7 +91,7 @@ def detect_columns():
 
         # 2. Detect Location Column in Users
         try:
-            cursor.execute(f"SELECT TOP 1 * FROM {Config.DB_AUTH}.dbo.ScanUsers")
+            cursor.execute(f"SELECT TOP 0 * FROM {Config.DB_AUTH}.dbo.ScanUsers WITH (NOLOCK)")
             cols = [c[0].lower() for c in cursor.description]
             if 'location_id' in cols: DB_COLS['ScanUsers_Loc'] = 'location_id'
             else: DB_COLS['ScanUsers_Loc'] = 'location'
@@ -85,7 +99,7 @@ def detect_columns():
 
         # 3. Check for UPC Column Support
         try:
-            cursor.execute(f"SELECT TOP 1 * FROM {Config.DB_AUTH}.dbo.ScanBinTran2")
+            cursor.execute(f"SELECT TOP 0 * FROM {Config.DB_AUTH}.dbo.ScanBinTran2 WITH (NOLOCK)")
             cols = [c[0].lower() for c in cursor.description]
             DB_COLS['ScanBinTran2_UPC'] = ('upc' in cols)
         except: DB_COLS['ScanBinTran2_UPC'] = False
@@ -358,7 +372,7 @@ def login():
             
         try:
             cursor = conn.cursor()
-            sql = f"SELECT * FROM {Config.DB_AUTH}.dbo.ScanUsers WHERE userid=? AND pw=?"
+            sql = f"SELECT * FROM {Config.DB_AUTH}.dbo.ScanUsers WITH (NOLOCK) WHERE userid=? AND pw=?"
             cursor.execute(sql, (user_id_input, password_input))
             row = cursor.fetchone()
             
@@ -403,13 +417,13 @@ def picking_menu():
     picker_val = ''
     
     if raw_so:
-        conn = get_db_connection()
+        conn = get_readonly_connection()
         try:
             cursor = conn.cursor()
-            
+
             # Validate Order
-            check_sql = f"SELECT TOP 1 sono FROM {Config.DB_ORDERS}.dbo.SOTRAN WHERE sono LIKE ?"
-            cursor.execute(check_sql, (f"%{raw_so.strip()}",))
+            check_sql = f"SELECT TOP 1 sono FROM {Config.DB_ORDERS}.dbo.SOTRAN WITH (NOLOCK) WHERE sono LIKE ?"
+            cursor.execute(check_sql, (f"{raw_so.strip()}%",))
             check_row = cursor.fetchone()
             
             if not check_row:
@@ -420,7 +434,7 @@ def picking_menu():
             
             # CHECK: Picker must be assigned (somast.picker cannot be NULL or blank)
             try:
-                picker_sql = f"SELECT picker FROM {Config.DB_ORDERS}.dbo.SOMAST WHERE sono=?"
+                picker_sql = f"SELECT picker FROM {Config.DB_ORDERS}.dbo.SOMAST WITH (NOLOCK) WHERE sono=?"
                 cursor.execute(picker_sql, (resolved_so,))
                 picker_row = cursor.fetchone()
                 picker_val = (str(picker_row[0]).strip() if picker_row and picker_row[0] is not None else '') if picker_row else ''
@@ -437,8 +451,8 @@ def picking_menu():
             
             # 1. FETCH ORDER LINES (exclude cancelled lines where sostat = 'X')
             base_sql = f"""
-                SELECT tranlineno, item, qtyord, shipqty, (qtyord - shipqty) as remaining, loctid 
-                FROM {Config.DB_ORDERS}.dbo.SOTRAN 
+                SELECT tranlineno, item, qtyord, shipqty, (qtyord - shipqty) as remaining, loctid
+                FROM {Config.DB_ORDERS}.dbo.SOTRAN WITH (NOLOCK)
                 WHERE sono=? AND qtyord > shipqty AND stkcode = 'Y' AND sostat <> 'X'
             """
             params = [resolved_so]
@@ -461,8 +475,8 @@ def picking_menu():
                     if unique_items:
                         placeholders = ','.join(['?'] * len(unique_items))
                         upc_sql = f"""
-                            SELECT item, upc 
-                            FROM {Config.DB_AUTH}.dbo.scanitem 
+                            SELECT item, upc
+                            FROM {Config.DB_AUTH}.dbo.scanitem WITH (NOLOCK)
                             WHERE item IN ({placeholders})
                         """
                         cursor.execute(upc_sql, tuple(unique_items))
@@ -506,16 +520,16 @@ def get_item_bins():
     data = request.json
     item_code = data.get('item', '').strip()
     user_loc = session.get('location', 'Unknown').strip()
-    
-    conn = get_db_connection()
+
+    conn = get_readonly_connection()
     try:
         cursor = conn.cursor()
         loc_col = DB_COLS['ScanOnhand2_Loc'] or 'terr'
         alloc_col = DB_COLS['ScanOnhand2_Alloc'] or 'aloc'
 
         sql = f"""
-            SELECT bin, onhand, {alloc_col}, {loc_col} 
-            FROM {Config.DB_AUTH}.dbo.ScanOnhand2 
+            SELECT bin, onhand, {alloc_col}, {loc_col}
+            FROM {Config.DB_AUTH}.dbo.ScanOnhand2 WITH (NOLOCK)
             WHERE item = ? AND onhand > 0
         """
         params = [item_code]
@@ -564,14 +578,14 @@ def validate_bin():
     bin_loc = data.get('bin', '').strip()
     item_code = data.get('item', '').strip()
     user_loc = session.get('location', 'Unknown').strip()
-    
-    conn = get_db_connection()
+
+    conn = get_readonly_connection()
     try:
         cursor = conn.cursor()
         loc_col = DB_COLS['ScanOnhand2_Loc'] or 'terr'
         
         sql = f"""
-            SELECT TOP 1 onhand FROM {Config.DB_AUTH}.dbo.ScanOnhand2 
+            SELECT TOP 1 onhand FROM {Config.DB_AUTH}.dbo.ScanOnhand2 WITH (NOLOCK)
             WHERE bin=? AND item = ? AND onhand > 0
         """
         params = [bin_loc, item_code]
@@ -675,110 +689,52 @@ def process_batch_scan():
 
     try:
         cursor = conn.cursor()
-        
+
+        # Set lock timeout to prevent indefinite waits on locked rows (10 seconds)
+        cursor.execute("SET LOCK_TIMEOUT 10000")
+
         col_loc = DB_COLS['ScanOnhand2_Loc'] or 'loctid'
         col_alloc = DB_COLS['ScanOnhand2_Alloc'] or 'aloc'
 
         # ===================================================================
         # PRE-AGGREGATE: Build line-level totals for SOTRAN validation
-        # Zero-qty picks (from Zero Pick workflow) are excluded here —
+        # AND inventory-level totals by (item, bin) for ScanOnhand2
+        # Zero-qty picks (from Zero Pick workflow) are excluded —
         # they don't update inventory or SOTRAN, only the audit log.
         # ===================================================================
         line_updates = {}
+        inv_updates = {}  # key: (item, bin) -> aggregated qty
         for pick in picks:
             line_no = pick.get('lineNo')
             qty = int(pick.get('qty', 0))
             item = pick.get('item', '').strip()
-            
+            bin_val = pick.get('bin', '').strip()
+
             if qty <= 0: continue  # Skip zero picks — audit-only
-            
+
             if line_no not in line_updates:
                 line_updates[line_no] = {'qty': 0, 'item': item}
             line_updates[line_no]['qty'] += qty
 
-        # ===================================================================
-        # PRE-COMMIT VALIDATION PHASE (read-only checks before any UPDATE)
-        # ===================================================================
-
-        # --- VALIDATE 1: ScanOnhand2 — enough available stock per pick ---
-        for pick in picks:
-            item = pick.get('item', '').strip()
-            bin_val = pick.get('bin', '').strip()
-            qty = int(pick.get('qty', 0))
-
-            if qty <= 0: continue
-
-            check_inv_sql = f"""
-                SELECT onhand, ISNULL({col_alloc}, 0) as current_alloc
-                FROM {Config.DB_AUTH}.dbo.ScanOnhand2 
-                WHERE item=? AND bin=? AND {col_loc}=?
-            """
-            cursor.execute(check_inv_sql, (item, bin_val, user_loc))
-            inv_row = cursor.fetchone()
-
-            if not inv_row:
-                raise Exception(
-                    f"PRE-CHECK FAILED: Item '{item}' not found in bin '{bin_val}' at location '{user_loc}'."
-                )
-            
-            current_onhand = int(inv_row[0] or 0)
-            current_alloc = int(inv_row[1] or 0)
-            available = current_onhand - current_alloc
-
-            if available < qty:
-                raise Exception(
-                    f"PRE-CHECK FAILED: Item '{item}' in bin '{bin_val}' — "
-                    f"available={available} (onhand={current_onhand}, alloc={current_alloc}), requested={qty}."
-                )
-
-        # --- VALIDATE 2: SOTRAN — enough remaining qty per order line ---
-        for line_no, line_data in line_updates.items():
-            agg_qty = line_data['qty']
-            item_code = line_data['item']
-
-            check_so_sql = f"""
-                SELECT qtyord, shipqty, (qtyord - shipqty) as remaining
-                FROM {Config.DB_ORDERS}.dbo.SOTRAN 
-                WHERE sono=? AND tranlineno=? AND item=?
-            """
-            cursor.execute(check_so_sql, (so_num, line_no, item_code))
-            so_row = cursor.fetchone()
-
-            if not so_row:
-                raise Exception(
-                    f"PRE-CHECK FAILED: Order line {line_no} for item '{item_code}' on SO '{so_num}' not found."
-                )
-
-            remaining = int(so_row[2] or 0)
-            if remaining < agg_qty:
-                raise Exception(
-                    f"PRE-CHECK FAILED: Order line {line_no} (item '{item_code}') — "
-                    f"remaining={remaining}, requested={agg_qty}. Would over-ship."
-                )
-
-        logging.info(f"Batch {batch_id}: All pre-commit validations passed.")
+            inv_key = (item, bin_val)
+            inv_updates[inv_key] = inv_updates.get(inv_key, 0) + qty
 
         # ===================================================================
-        # PART 1: Inventory Update (ScanOnhand2) — with SQL-level guard
+        # PART 1: Inventory Update (ScanOnhand2) — aggregated by (item, bin)
+        # SQL-level WHERE guard is the real safety net against concurrency.
         # ===================================================================
-        for pick in picks:
-            item = pick.get('item', '').strip()
-            bin_val = pick.get('bin', '').strip()
-            qty = int(pick.get('qty', 0))
+        update_inv_sql = f"""
+            UPDATE {Config.DB_AUTH}.dbo.ScanOnhand2
+            SET {col_alloc} = ISNULL({col_alloc}, 0) + ?,
+                avail = onhand - (ISNULL({col_alloc}, 0) + ?),
+                lupdate = GETDATE(),
+                luser = ?
+            WHERE item=? AND bin=? AND {col_loc}=?
+              AND (onhand - ISNULL({col_alloc}, 0)) >= ?
+        """
+        for (item, bin_val), agg_qty in inv_updates.items():
+            cursor.execute(update_inv_sql, (agg_qty, agg_qty, user_id, item, bin_val, user_loc, agg_qty))
 
-            if qty <= 0: continue
-
-            update_inv_sql = f"""
-                UPDATE {Config.DB_AUTH}.dbo.ScanOnhand2
-                SET {col_alloc} = ISNULL({col_alloc}, 0) + ?, 
-                    avail = onhand - (ISNULL({col_alloc}, 0) + ?),
-                    lupdate = GETDATE(),
-                    luser = ?
-                WHERE item=? AND bin=? AND {col_loc}=?
-                  AND (onhand - ISNULL({col_alloc}, 0)) >= ?
-            """
-            cursor.execute(update_inv_sql, (qty, qty, user_id, item, bin_val, user_loc, qty))
-            
             if cursor.rowcount == 0:
                 raise Exception(
                     f"INVENTORY GUARD: Update rejected for item '{item}' at bin '{bin_val}'. "
@@ -788,9 +744,15 @@ def process_batch_scan():
         # ===================================================================
         # PART 2: Sales Order Update (SOTRAN) — with SQL-level guard
         # ===================================================================
-        # Store expected shipqty for post-commit verification
         expected_shipqty = {}
 
+        update_so_sql = f"""
+            UPDATE {Config.DB_ORDERS}.dbo.SOTRAN
+            SET shipqty = shipqty + ?,
+                shipdate = GETDATE()
+            WHERE sono=? AND tranlineno=? AND item=?
+              AND (qtyord - shipqty) >= ?
+        """
         for line_no, line_data in line_updates.items():
             agg_qty = line_data['qty']
             item_code = line_data['item']
@@ -804,15 +766,8 @@ def process_batch_scan():
             pre_shipqty = int(pre_row[0] or 0) if pre_row else 0
             expected_shipqty[line_no] = pre_shipqty + agg_qty
 
-            update_so_sql = f"""
-                UPDATE {Config.DB_ORDERS}.dbo.SOTRAN
-                SET shipqty = shipqty + ?,
-                    shipdate = GETDATE()
-                WHERE sono=? AND tranlineno=? AND item=?
-                  AND (qtyord - shipqty) >= ?
-            """
             cursor.execute(update_so_sql, (agg_qty, so_num, line_no, item_code, agg_qty))
-            
+
             if cursor.rowcount == 0:
                 raise Exception(
                     f"ORDER GUARD: Update rejected for line {line_no} (item '{item_code}'). "
@@ -820,34 +775,32 @@ def process_batch_scan():
                 )
 
         # ===================================================================
-        # PART 3: Audit Log Insert (ScanBinTran2) — with exception codes
+        # PART 3: Audit Log Insert (ScanBinTran2) — batched with executemany
         # Zero-qty picks ARE included here — this is their only DB write.
         # ===================================================================
+        insert_sql = f"""
+            INSERT INTO {Config.DB_AUTH}.dbo.ScanBinTran2
+            (actiontype, applid, udref, tranlineno, upc, item, binfr, quantity, userid, deviceid, adddate, scanstat, scanresult)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), ?, ?)
+        """
+        audit_rows = []
         for pick in picks:
             line_no = pick.get('lineNo')
             qty = int(pick.get('qty', 0))
             item = pick.get('item', '').strip()
             bin_val = pick.get('bin', '').strip()
-            upc_val = item 
+            upc_val = item
 
-            # Exception code priority:
-            # 1. Pick-level exception (from Zero Pick workflow — baked into the pick)
-            # 2. Top-level exceptions dict (from Short Pick exception modal)
-            # 3. Empty string (fully picked, no exception)
             raw_exception = pick.get('exception', '') or exceptions.get(str(line_no), '')
-            
-            # SAFETY TRUNCATION: Force it to max 10 chars to protect the database column
             safe_exception_code = str(raw_exception)[:10] if raw_exception else ''
 
-            insert_sql = f"""
-                INSERT INTO {Config.DB_AUTH}.dbo.ScanBinTran2 
-                (actiontype, applid, udref, tranlineno, upc, item, binfr, quantity, userid, deviceid, adddate, scanstat, scanresult)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), ?, ?)
-            """
-            cursor.execute(insert_sql, (
+            audit_rows.append((
                 'SP', 'SO', so_num, line_no, upc_val, item, bin_val, qty,
                 user_id, device_id, '', safe_exception_code
             ))
+
+        cursor.fast_executemany = True
+        cursor.executemany(insert_sql, audit_rows)
 
         # ===================================================================
         # FINAL COMMIT
@@ -865,7 +818,7 @@ def process_batch_scan():
             for line_no, expected_val in expected_shipqty.items():
                 item_code = line_updates[line_no]['item']
                 cursor.execute(
-                    f"SELECT shipqty FROM {Config.DB_ORDERS}.dbo.SOTRAN WHERE sono=? AND tranlineno=? AND item=?",
+                    f"SELECT shipqty FROM {Config.DB_ORDERS}.dbo.SOTRAN WITH (NOLOCK) WHERE sono=? AND tranlineno=? AND item=?",
                     (so_num, line_no, item_code)
                 )
                 post_row = cursor.fetchone()
