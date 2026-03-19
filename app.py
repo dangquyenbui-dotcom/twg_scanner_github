@@ -423,7 +423,7 @@ def picking_menu():
 
             # Validate Order
             check_sql = f"SELECT TOP 1 sono FROM {Config.DB_ORDERS}.dbo.SOTRAN WITH (NOLOCK) WHERE sono LIKE ?"
-            cursor.execute(check_sql, (f"{raw_so.strip()}%",))
+            cursor.execute(check_sql, (f"%{raw_so.strip()}",))
             check_row = cursor.fetchone()
             
             if not check_row:
