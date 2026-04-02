@@ -462,11 +462,12 @@ def picking_menu():
             
             user_loc = session.get('location', 'Unknown').strip()
             
-            # 1. FETCH ORDER LINES (exclude cancelled lines where sostat = 'X')
+            # 1. FETCH ORDER LINES (exclude cancelled 'X', voided 'V', closed 'C')
             base_sql = f"""
                 SELECT tranlineno, item, qtyord, shipqty, (qtyord - shipqty) as remaining, loctid
                 FROM {Config.DB_ORDERS}.dbo.SOTRAN WITH (NOLOCK)
-                WHERE sono=? AND qtyord > shipqty AND stkcode = 'Y' AND sostat <> 'X'
+                WHERE sono=? AND qtyord > shipqty AND stkcode = 'Y'
+                  AND sostat NOT IN ('X', 'V', 'C')
             """
             params = [resolved_so]
             
